@@ -5,6 +5,8 @@ import { sfx, unlockAudio } from './audio.js';
 import { createEditor } from './editor.js';
 import { loadConfig, saveConfig, loadPref, savePref } from './storage.js';
 import { ARENAS, DEFAULT_ARENA } from './arenas.js';
+import { TUNE } from './tuning.js';
+import { analyzeSwipe, handOf, timingInfo, buildPlayerShot, buildAiShot, pickAiKind, simulateShot } from './shots.js';
 
 // ───────────────────────── 基本設定 ─────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -16,9 +18,9 @@ const WIN_SCORE = 11;
 const PLAYER_Z = 3.0;
 const AI_Z = -2.6;
 const DIFFS = {
-  easy:   { miss: 0.28, err: 0.55, react: 0.7, hitR: 72 },
-  normal: { miss: 0.14, err: 0.35, react: 0.85, hitR: 58 },
-  hard:   { miss: 0.05, err: 0.18, react: 1.0, hitR: 46 },
+  easy:   { miss: 0.28, err: 0.55, react: 0.7, hitR: 72, aggr: 0.3 },
+  normal: { miss: 0.14, err: 0.35, react: 0.85, hitR: 58, aggr: 0.55 },
+  hard:   { miss: 0.05, err: 0.18, react: 1.0, hitR: 46, aggr: 0.9 },
 };
 let diff = DIFFS.normal;
 
@@ -206,7 +208,7 @@ function canHitNow() {
 }
 function updateHitRing() {
   const el = $('hitRing');
-  if (!canHitNow()) { el.style.display = 'none'; return; }
+  if (!canHitNow()) { el.style.display = 'none'; $('timeRing').style.display = 'none'; return; }
   const p = ballScreen();
   const R = hitR();
   el.style.display = 'block';
@@ -215,6 +217,18 @@ function updateHitRing() {
   el.style.top = `${p.y}px`;
   const tq = state === 'serve' ? 1 : clamp(1 - Math.abs(ball.pos.z - 1.4) / 1.1, 0, 1);
   el.classList.toggle('gold', tq > 0.8);
+  el.dataset.hand = state === 'serve' ? '發球' : (handOf(ball.pos.x, player.x) === 'FH' ? '正手' : '反手');
+  // 時機圈：外圈縮到跟綠圈一樣大的那一刻就是最佳擊球時機
+  const tr = $('timeRing');
+  if (state === 'rally') {
+    const t = timingInfo(ball.pos.z);
+    tr.style.display = 'block';
+    tr.style.width = tr.style.height = `${R * 2 * (1 + 1.3 * Math.abs(t.off))}px`;
+    tr.style.left = `${p.x}px`;
+    tr.style.top = `${p.y}px`;
+    tr.classList.toggle('perfect', Math.abs(t.off) < 0.2);
+    tr.dataset.t = t.name;
+  } else tr.style.display = 'none';
 }
 
 // 得分回放：把最後一球的軌跡用慢動作放大重播
@@ -419,8 +433,8 @@ function rebuildPlayer(cfg) {
 }
 setHeadGhost(player, true);
 
-function swingActor(c, toPos, dirX = 0, dur = 0.3) {
-  c.swing = { t: 0, to: toPos.clone(), dirX, dur };
+function swingActor(c, toPos, dirX = 0, dur = 0.3, bh = false) {
+  c.swing = { t: 0, to: toPos.clone(), dirX, dur, bh };
 }
 
 const _v = new THREE.Vector3();
@@ -436,11 +450,11 @@ function updateActor(c, dt, time) {
     c.react -= dt;
     const k = Math.max(0, c.react), f = Math.min(1, k * 2);
     if (c.reactKind === 'win') {
-      c.body.position.y += Math.abs(Math.sin(k * 13)) * 0.32 * f;
-      c.head.rotation.z += Math.sin(k * 28) * 0.2 * f;
+      c.body.position.y += Math.abs(Math.sin(k * 13)) * TUNE.reactJump * f;
+      c.head.rotation.z += Math.sin(k * 28) * TUNE.reactWobble * f;
     } else {
-      c.head.rotation.z += Math.sin(k * 24) * 0.35 * f;
-      const sq = 1 + Math.sin(k * 10) * 0.18 * f;
+      c.head.rotation.z += Math.sin(k * 24) * TUNE.reactWobble * 1.5 * f;
+      const sq = 1 + Math.sin(k * 10) * 0.1 * f;
       c.head.scale.set(sq, 1 / sq, sq);
     }
   } else c.head.scale.set(1, 1, 1);
@@ -451,6 +465,8 @@ function updateActor(c, dt, time) {
   const handSide = Math.sign(_v.x - c.x) || 1;      // 球拍手在畫面哪一側
   const rest = new THREE.Vector3(c.x + handSide * 0.5, 1.0, c.baseZ + fwd * 0.55);
   const pos = rest.clone();
+  const restMirror = rest.clone();
+  restMirror.x = c.x - handSide * 0.5; // 反手：球拍從身體另一側橫過來
   let tilt = 0;
   if (c.swing) {
     const s = c.swing;
@@ -459,7 +475,7 @@ function updateActor(c, dt, time) {
       c.swing = null;
     } else {
       const k = s.t < 0.35 ? 1 - Math.pow(1 - s.t / 0.35, 3) : 1 - Math.pow((s.t - 0.35) / 0.65, 2);
-      pos.lerpVectors(rest, s.to, k);
+      pos.lerpVectors(s.bh ? restMirror : rest, s.to, k);
       tilt = s.dirX * k;
     }
   }
@@ -558,7 +574,7 @@ function award(winner, why) {
   pointTimer = rdur > 0 ? rdur + 0.5 : 1.7;
   rally = 0;
   react(winner);
-  if (longRally && !rdur) { slowT = 0.7; fovKick = -8; }
+  if (longRally && !rdur) { slowT = TUNE.smashSlow; fovKick = TUNE.smashFov; }
   if (winner === 'player') { sfx.point(); pop(why || '得分！', '#7dff9a'); }
   else { sfx.lose(); pop(why || '失分…', '#ff7d7d'); }
   updateScoreUI();
@@ -611,79 +627,39 @@ function launch(shot, hitter) {
   updateScoreUI();
 }
 
-function analyzeSwipe(pts) {
-  const a = pts[0], b = pts[pts.length - 1];
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const len = Math.hypot(dx, dy);
-  const dur = Math.max(40, b.t - a.t);
-  let signed = 0;
-  for (const p of pts) {
-    const cross = ((p.x - a.x) * dy - (p.y - a.y) * dx) / (len || 1);
-    if (Math.abs(cross) > Math.abs(signed)) signed = cross;
-  }
-  return { dx, dy, len, dur, speed: len / dur, curve: signed / (len || 1) };
-}
-
-// 把一次滑動轉成一記球（目標點、飛行時間、旋轉）
-function makeShot(s, p0, isServe, quality) {
-  const fwd = -s.dy;
-  let p = clamp((s.speed - 0.35) / 1.7, 0, 1);
-  if (isServe) p = Math.min(p, 0.55);
-  let label = '';
-  let top = 0.15 + 0.5 * p;
-  let side = 0;
-  let T = 0.9 - 0.45 * p;
-  let tz = -(0.55 + 0.7 * p);
-  let smash = false;
-
-  if (Math.abs(s.curve) > 0.09) {
-    side = clamp(-s.curve * 5.5, -1, 1);
-    if (Math.abs(side) < 0.35) side = Math.sign(side) * 0.35; // 一劃出弧線就要有效果
-    label = `${Math.abs(side) > 0.85 ? '強' : ''}${side > 0 ? '右旋 ↷' : '左旋 ↶'}`;
-  }
-  const ang = fwd > 0 ? Math.atan2(s.dx, fwd) : Math.sign(s.dx || 1) * 0.6;
-  let tx = clamp(ang / 0.9, -1, 1) * 0.62;
-
-  if (!isServe && s.dy > 25 && fwd <= 0) {
-    top = -0.9; T = 0.95; tz = -rnd(0.6, 1.0); p = Math.min(p, 0.4); label = '切球';
-    tx = clamp(s.dx / 150, -1, 1) * 0.55;
-  } else if (!isServe && p < 0.22) {
-    top = -0.5; T = 0.95; tz = -rnd(0.35, 0.55); label = '吊球';
-  } else if (!isServe && p > 0.78 && p0.y > 0.95) {
-    smash = true; T = 0.33; tz = -1.25; top = 0.2; label = '殺球！';
-  } else if (!label && top > 0.45) {
-    label = '上旋';
-  }
-
-  if (!isServe) {
-    const err = (1 - quality) * 0.5;
-    tx += rnd(-err, err);
-    T += (1 - quality) * 0.12;
-    if (quality > 0.85 && !smash) label = label ? `完美 ${label}` : '完美！';
-  }
-  tx = clamp(tx, -0.74, 0.74);
-  return {
-    target: { x: tx, y: TABLE.top + BALL_R, z: tz },
-    T, spin: { top, side }, label, smash,
-  };
+// 擊球後在畫面上方顯示：球種、時機、球速、弧度、落點（方便「看」每一球的結果）
+let shotInfoTimer = 0;
+function showShotInfo(shot, sim, tInfo) {
+  const el = $('shotInfo');
+  el.replaceChildren();
+  const l1 = document.createElement('b');
+  l1.textContent = shot.label;
+  const l2 = document.createElement('span');
+  const parts = [];
+  if (tInfo) parts.push(`時機${tInfo.name}`);
+  parts.push(`球速 ${Math.round(sim.speed * 3.6)} km/h`);
+  parts.push(`弧度 ${sim.curveCm} cm`);
+  parts.push(sim.landing ? `落點 ${sim.landing.zone}` : (sim.hitNet ? '會掛網！' : '會出界！'));
+  l2.textContent = parts.join(' · ');
+  el.append(l1, l2);
+  el.style.display = 'flex';
+  clearTimeout(shotInfoTimer);
+  shotInfoTimer = setTimeout(() => { el.style.display = 'none'; }, 2600);
+  if (sim.landing) setLanding(sim.landing.x, sim.landing.z); // 立刻在球桌上標出落點
 }
 
 function playerServe(s) {
   if (-s.dy < 25) return;
   if (!s.anyWin || s.contact > hitR()) { sfx.whoosh(); pop('要從球上滑過去！', '#ffd23f'); return; }
   const p0 = { ...ball.pos };
-  const m = makeShot(s, p0, true, 1);
-  const sol = solveShot(p0, m.target, m.T, m.spin);
-  launch({ vel: sol.vel, spin: m.spin }, 'player');
+  const shot = buildPlayerShot({ swipe: s, p0, hand: 'FH', isServe: true });
+  const sol = solveShot(p0, shot.target, shot.T, shot.spin, shot.clearance);
+  launch({ vel: sol.vel, spin: shot.spin }, 'player');
   state = 'rally';
   swingActor(player, new THREE.Vector3(p0.x, p0.y, p0.z), clamp(s.dx / 120, -1, 1));
   sfx.hit();
   setHint('');
-}
-
-function inHitWindow() {
-  return lastHitter === 'ai' && bounce.player >= 1 && ball.vel.z > 0
-    && ball.pos.z > 0.5 && ball.pos.z < 2.6 && ball.pos.y > 0.45;
+  showShotInfo(shot, simulateShot(p0, shot), null);
 }
 
 function playerSwipe(s) {
@@ -707,31 +683,33 @@ function playerSwipe(s) {
     return;
   }
   const p0 = { ...ball.pos };
-  const timeQ = clamp(1 - Math.abs(p0.z - 1.4) / 1.1, 0, 1);
-  const acc = clamp(1 - s.contact / hitR(), 0, 1);
-  const quality = clamp(0.6 * timeQ + 0.4 * acc, 0, 1); // 時機 + 滑得準不準
-  const m = makeShot(s, p0, false, quality);
-  const sol = solveShot(p0, m.target, m.T, m.spin, m.smash ? 0.02 : 0.05);
-  launch({ vel: sol.vel, spin: m.spin }, 'player');
-  lastShotWasSmash = m.smash;
-  swingActor(player, new THREE.Vector3(p0.x, p0.y, p0.z), dirX);
-  if (m.smash) { sfx.smash(); shake = 0.4; hitStop = 0.07; slowT = 0.5; fovKick = -14; }
-  else { sfx.hit(); if (quality > 0.85) fovKick = -5; }
-  if (Math.abs(m.spin.side) >= 0.6) camRollTarget = -m.spin.side * 0.14;
-  if (m.label) pop(m.label, m.smash ? '#ff6b3d' : quality > 0.85 ? '#7dff9a' : '#ffd23f');
+  const hand = handOf(p0.x, player.x);                    // 球在身體右側＝正手，左側＝反手
+  const tInfo = timingInfo(s.contactZ ?? p0.z);           // 以「滑過球的那一刻」的位置判斷時機
+  const acc = clamp(1 - s.contact / hitR(), 0, 1);        // 滑得準不準
+  const shot = buildPlayerShot({ swipe: s, p0, hand, timingOff: tInfo.off, acc });
+  const sol = solveShot(p0, shot.target, shot.T, shot.spin, shot.clearance);
+  launch({ vel: sol.vel, spin: shot.spin }, 'player');
+  lastShotWasSmash = shot.smash;
+  swingActor(player, new THREE.Vector3(p0.x, p0.y, p0.z), dirX, 0.3, hand === 'BH');
+  if (shot.smash) { sfx.smash(); shake = TUNE.smashShake; hitStop = 0.06; slowT = TUNE.smashSlow; fovKick = TUNE.smashFov; }
+  else { sfx.hit(); if (shot.perfect) fovKick = -3; }
+  if (Math.abs(shot.spin.side) >= 0.5) camRollTarget = -shot.spin.side * TUNE.camRoll;
+  pop(shot.label, shot.smash ? '#ff6b3d' : shot.perfect ? '#7dff9a' : '#ffd23f');
+  showShotInfo(shot, simulateShot(p0, shot), tInfo);
 }
 
 function aiServe() {
   const p0 = { ...ball.pos };
-  const target = { x: rnd(-0.6, 0.6), y: TABLE.top + BALL_R, z: rnd(0.45, 1.15) };
-  const spin = { top: rnd(0, 0.5), side: Math.random() < 0.55 ? rnd(0.5, 1) * (Math.random() < 0.5 ? -1 : 1) : 0 };
-  const sol = solveShot(p0, target, rnd(0.75, 0.95), spin);
-  launch({ vel: sol.vel, spin }, 'ai');
-  setLanding(target.x, target.z);
+  const kind = ['drive', 'spin', 'loop', 'chop', 'drop'][Math.floor(Math.random() * 5)];
+  const shot = buildAiShot(kind, 0.2);
+  shot.target.z = clamp(shot.target.z, 0.4, 1.15); // 發球要落在你這邊的前半桌
+  const sol = solveShot(p0, shot.target, shot.T, shot.spin);
+  launch({ vel: sol.vel, spin: shot.spin }, 'ai');
+  setLanding(shot.target.x, shot.target.z);
   state = 'rally';
   swingActor(ai, new THREE.Vector3(p0.x, p0.y, p0.z), 0);
   sfx.hit();
-  announceSpin(spin);
+  announceShot(shot);
 }
 
 function aiReturn() {
@@ -745,27 +723,26 @@ function aiReturn() {
     swingActor(ai, new THREE.Vector3(p0.x + rnd(-0.5, 0.5), p0.y, p0.z - 0.1), 0.5, 0.35);
     return;
   }
-  const e = diff.err;
-  const target = { x: clamp(rnd(-0.62, 0.62) + rnd(-e, e) * 0.5, -0.72, 0.72), y: TABLE.top + BALL_R, z: rnd(0.35, 1.25) };
-  const r = Math.random();
-  const sideMag = rnd(0.5, 1.0) * (Math.random() < 0.5 ? -1 : 1);
-  const spin = r < 0.2 ? { top: rnd(-0.7, -0.3), side: 0 }
-    : { top: rnd(0.1, 0.6), side: Math.random() < 0.6 ? sideMag : 0 };
-  const T = r < 0.15 ? rnd(1.0, 1.15) : rnd(0.55, 0.9);
-  const sol = solveShot(p0, target, T, spin);
-  launch({ vel: sol.vel, spin }, 'ai');
-  setLanding(target.x, target.z);
-  lastShotWasSmash = false;
-  swingActor(ai, new THREE.Vector3(p0.x, p0.y, p0.z), clamp(target.x, -1, 1));
-  sfx.hit();
-  announceSpin(spin);
+  const kind = pickAiKind({ hitY: p0.y, rally, aggressive: diff.aggr });
+  const shot = buildAiShot(kind, diff.err);
+  const sol = solveShot(p0, shot.target, shot.T, shot.spin);
+  launch({ vel: sol.vel, spin: shot.spin }, 'ai');
+  setLanding(shot.target.x, shot.target.z);
+  lastShotWasSmash = kind === 'smash';
+  swingActor(ai, new THREE.Vector3(p0.x, p0.y, p0.z), clamp(shot.target.x, -1, 1));
+  if (lastShotWasSmash) { sfx.smash(); shake = 0.12; } else sfx.hit();
+  announceShot(shot);
 }
 
-function announceSpin(spin) {
-  const info = spinInfo(spin);
-  if (Math.abs(spin.side) >= 0.8) camRollTarget = -spin.side * 0.08;
-  if (info) setHint(`來球是${info.name}！彈起後會${info.name === '右旋' ? '往右' : info.name === '左旋' ? '往左' : '變快／變慢'}偏`);
-  else setHint('球彈起來後，往前滑動擊球');
+function announceShot(shot) {
+  const info = spinInfo(shot.spin);
+  if (Math.abs(shot.spin.side) >= 0.5) camRollTarget = -shot.spin.side * TUNE.camRoll;
+  let tip = '';
+  if (Math.abs(shot.spin.side) >= 0.3) tip = `（彈起後會往${shot.spin.side > 0 ? '右' : '左'}偏）`;
+  else if (shot.spin.top <= -0.3) tip = '（彈起後會變慢、變短）';
+  else if (shot.spin.top >= 0.45) tip = '（彈起後會變快）';
+  else if (!info) tip = '';
+  setHint(`對手${shot.label}！${tip}`);
 }
 
 // ───────────────────────── 每步更新 ─────────────────────────
@@ -834,8 +811,8 @@ let pts = null;
 const cv = renderer.domElement;
 // 每個取樣點記下「當下球在螢幕上的位置」，之後判斷滑動有沒有經過球
 function mkSample(e) {
-  const p = { x: e.clientX, y: e.clientY, t: performance.now(), ok: false, bx: 0, by: 0 };
-  if (canHitNow()) { const b = ballScreen(); p.ok = true; p.bx = b.x; p.by = b.y; }
+  const p = { x: e.clientX, y: e.clientY, t: performance.now(), ok: false, bx: 0, by: 0, bz: 0 };
+  if (canHitNow()) { const b = ballScreen(); p.ok = true; p.bx = b.x; p.by = b.y; p.bz = ball.pos.z; }
   return p;
 }
 function segDist(px, py, ax, ay, bx, by) {
@@ -894,7 +871,8 @@ function endSwipe(e) {
     if (!p.ok) return;
     s.anyWin = true;
     const q = i > 0 ? pts[i - 1] : p;
-    s.contact = Math.min(s.contact, segDist(p.bx, p.by, q.x, q.y, p.x, p.y));
+    const d = segDist(p.bx, p.by, q.x, q.y, p.x, p.y);
+    if (d < s.contact) { s.contact = d; s.contactZ = p.bz; } // 最貼近球的那一刻 = 擊球時機
   });
   pts = null;
   $('hitRing').classList.remove('touch');
@@ -1043,7 +1021,7 @@ function frame(now) {
   last = now;
   if (hitStop > 0) hitStop -= rawDt;
   slowT = Math.max(0, slowT - rawDt);
-  timeScale = lerp(timeScale, slowT > 0 ? 0.3 : 1, 1 - Math.exp(-14 * rawDt));
+  timeScale = lerp(timeScale, slowT > 0 ? TUNE.slowScale : 1, 1 - Math.exp(-14 * rawDt));
   const dt = hitStop > 0 ? 0 : rawDt * timeScale;
   time += dt;
   clockT += dt;
@@ -1058,7 +1036,7 @@ function frame(now) {
   if (rec.length > 600) rec.splice(0, rec.length - 600);
   if (replay) stepReplay(rawDt);
   updateRipples(rawDt);
-  landingMark.visible = landingOn && state === 'rally' && lastHitter === 'ai' && bounce.player === 0;
+  landingMark.visible = landingOn && state === 'rally' && bounce[other(lastHitter)] === 0;
   if (landingMark.visible) landingMark.scale.setScalar(1 + Math.sin(time * 10) * 0.12);
   $('replayTag').style.display = replay ? 'block' : 'none';
   if (state === 'serve') {
@@ -1072,8 +1050,9 @@ function frame(now) {
 
   // 玩家左右跟著來球移動；對手預判落點
   let ptx = 0;
-  if (state === 'rally' && lastHitter === 'ai') ptx = clamp(ball.pos.x + ball.vel.x * 0.25, -1.2, 1.2);
-  player.x = lerp(player.x, ptx, 1 - Math.exp(-7 * dt));
+  // 身體只跟著球移動六成，所以球在左側時會用反手、在右側時用正手
+  if (state === 'rally' && lastHitter === 'ai') ptx = 0.6 * clamp(ball.pos.x + ball.vel.x * 0.3, -1.4, 1.4);
+  player.x = lerp(player.x, ptx, 1 - Math.exp(-5 * dt));
   let atx = 0;
   if (state === 'rally' && lastHitter === 'player') atx = clamp(ball.pos.x + ball.vel.x * 0.3, -1.2, 1.2) * diff.react;
   ai.x = lerp(ai.x, atx, 1 - Math.exp(-6 * dt * diff.react));
@@ -1129,8 +1108,8 @@ function frame(now) {
     const sx = (Math.random() - 0.5) * shake * 0.14, sy = (Math.random() - 0.5) * shake * 0.14;
     const camPos = new THREE.Vector3(
       CAM_BASE.x + clamp(ball.pos.x, -1.6, 1.6) * 0.32 + sx,
-      lerp(CAM_BASE.y, 2.9, camApproach) - 0.7 * pointDolly + sy,
-      lerp(CAM_BASE.z, 4.8, camApproach) - 1.4 * pointDolly,
+      lerp(CAM_BASE.y, 2.9, camApproach) - 0.7 * TUNE.pointDolly * pointDolly + sy,
+      lerp(CAM_BASE.z, 4.8, camApproach) - 1.4 * TUNE.pointDolly * pointDolly,
     );
     const ly = 0.4 + clamp(ball.pos.y - 0.8, 0, 1) * 0.25;
     const look = new THREE.Vector3(

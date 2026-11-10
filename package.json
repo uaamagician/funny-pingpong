@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "lab": "node scripts/shot-lab.mjs",
+    "lab:compare": "node scripts/shot-lab.mjs compare"
   },
   "dependencies": {
     "three": "^0.187.0"

@@ -25,6 +25,14 @@
     @keyframes pop { 0%{opacity:0;transform:scale(.4) rotate(-6deg)} 15%{opacity:1;transform:scale(1.2) rotate(3deg)} 30%{transform:scale(1) rotate(0)} 80%{opacity:1} 100%{opacity:0;transform:scale(1) translateY(-30px)} }
     .swipefx { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; }
     .hitring { position:absolute; display:none; transform:translate(-50%,-50%); border:4px solid #7dff9a; border-radius:50%; box-shadow:0 0 18px #7dff9a, inset 0 0 14px rgba(125,255,154,.45); pointer-events:none; z-index:1; animation:ringpulse .5s ease-in-out infinite alternate; }
+    .hitring::after { content:attr(data-hand); position:absolute; top:-26px; left:50%; transform:translateX(-50%); font-weight:900; font-size:14px; color:#fff; text-shadow:0 2px 0 #000; white-space:nowrap; }
+    .timering { position:absolute; display:none; transform:translate(-50%,-50%); border:3px solid rgba(255,255,255,.85); border-radius:50%; pointer-events:none; z-index:1; }
+    .timering.perfect { border-color:#ffd23f; box-shadow:0 0 14px #ffd23f; }
+    .timering::after { content:attr(data-t); position:absolute; bottom:-24px; left:50%; transform:translateX(-50%); font-size:13px; font-weight:800; color:#fff; text-shadow:0 2px 0 #000; white-space:nowrap; }
+    .timering.perfect::after { color:#ffd23f; }
+    .shotinfo { position:absolute; display:none; flex-direction:column; align-items:center; gap:2px; left:50%; top:calc(env(safe-area-inset-top) + 82px); transform:translateX(-50%); background:rgba(20,10,45,.82); border:2px solid rgba(255,255,255,.25); border-radius:14px; padding:6px 14px; pointer-events:none; z-index:2; max-width:92vw; text-align:center; }
+    .shotinfo b { font-size:17px; color:#ffd23f; }
+    .shotinfo span { font-size:12px; opacity:.9; }
     .hitring.gold { border-color:#ffd23f; box-shadow:0 0 22px #ffd23f, inset 0 0 16px rgba(255,210,63,.55); }
     .hitring.touch { background:rgba(255,255,255,.25); }
     @keyframes ringpulse { from { opacity:.65; scale:.94; } to { opacity:1; scale:1.04; } }
@@ -94,7 +102,9 @@
     <button class="quit hidden" id="quitBtn" aria-label="離開">✕</button>
     <div class="rally" id="rally"></div>
     <canvas class="swipefx" id="swipeFx"></canvas>
+    <div class="timering" id="timeRing"></div>
     <div class="hitring" id="hitRing"></div>
+    <div class="shotinfo" id="shotInfo"></div>
     <div class="replaytag" id="replayTag">🔍 回放　<small>點一下跳過</small></div>
     <div class="pop" id="pop"></div>
     <div class="spintag" id="spinTag"></div>
