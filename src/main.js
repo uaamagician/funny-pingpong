@@ -1,3 +1,4 @@
+import '@fontsource/iansui/index.css'; // 正體手寫字體（芫荽），打包進網站，不從外部載入
 import * as THREE from 'three';
 import { buildCharacter, randomConfig, stretchArm, DEFAULT_CONFIG } from './character.js';
 import { TABLE, BALL_R, NET_TOP, makeBall, stepBall, bounceOnTable } from './physics.js';
