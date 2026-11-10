@@ -13,7 +13,7 @@ export function makeBall() {
 }
 
 export function stepBall(b, dt) {
-  const gEff = G + b.spin.top * TUNE.topG;
+  const gEff = G * TUNE.gravity + b.spin.top * TUNE.topG;
   b.vel.y -= gEff * dt;
   b.vel.x += b.spin.side * TUNE.sideA * dt;
   b.pos.x += b.vel.x * dt;
@@ -37,7 +37,7 @@ export function bounceOnTable(b) {
  * 所以旋轉會讓軌跡彎曲，但落點仍在目標附近）。若過不了網就拉長飛行時間讓球弧度變高。
  */
 export function solveShot(p0, target, T0, spin, clearance = 0.05) {
-  const gEff = G + spin.top * TUNE.topG;
+  const gEff = G * TUNE.gravity + spin.top * TUNE.topG;
   const ax = spin.side * TUNE.sideA;
   let T = T0;
   let res;
