@@ -375,18 +375,52 @@ applyArena(loadPref('arena2', DEFAULT_ARENA));
 
 // 球、影子、殘影
 const ball = makeBall();
-// 球上有條紋，旋轉才看得出來
-const ballTex = (() => {
+// 球的外觀（造型）：每種球有自己的花紋，球旋轉時看得出來。花紋用程式畫成貼圖。
+const _ballTex = {};
+function ballTexture(id) {
+  if (_ballTex[id]) return _ballTex[id];
   const c = document.createElement('canvas');
-  c.width = 128; c.height = 64;
+  c.width = 256; c.height = 128;
   const g = c.getContext('2d');
-  g.fillStyle = '#fff6dc'; g.fillRect(0, 0, 128, 64);
-  g.fillStyle = '#ff7a1a';
-  for (let i = 0; i < 4; i++) g.fillRect(i * 32 + 6, 0, 14, 64);
+  const W = 256, H = 128;
+  const stripes = (col, n, w) => { g.fillStyle = col; for (let i = 0; i < n; i++) g.fillRect((i * W) / n + 6, 0, w, H); };
+  if (id === 'lead') {
+    const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#b7c0cc'); gr.addColorStop(1, '#6f7886');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#3b424d';
+    for (let y = 14; y < H; y += 28) for (let x = 14 + ((y / 28) % 2) * 14; x < W; x += 28) { g.beginPath(); g.arc(x, y, 3.2, 0, 7); g.fill(); }
+  } else if (id === 'bubble') {
+    const gr = g.createLinearGradient(0, 0, W, H); gr.addColorStop(0, '#a6e3ff'); gr.addColorStop(1, '#eaf9ff');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 3;
+    for (const [x, y, r] of [[40, 40, 16], [110, 80, 22], [180, 36, 14], [225, 95, 18], [70, 100, 10]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke(); }
+  } else if (id === 'spring') {
+    g.fillStyle = '#7bd389'; g.fillRect(0, 0, W, H);
+    g.strokeStyle = '#fff3a8'; g.lineWidth = 8; g.lineJoin = 'round';
+    for (const y of [26, 64, 102]) { g.beginPath(); for (let x = 0; x <= W; x += 16) g.lineTo(x, y + (x / 16 % 2 ? 10 : -10)); g.stroke(); }
+  } else if (id === 'fire') {
+    const gr = g.createLinearGradient(0, H, 0, 0); gr.addColorStop(0, '#ff3d00'); gr.addColorStop(1, '#ffb300');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    g.fillStyle = 'rgba(120,10,0,.55)';
+    for (let x = 0; x < W; x += 32) { g.beginPath(); g.moveTo(x, H); g.lineTo(x + 16, 30 + (x % 64 ? 24 : 0)); g.lineTo(x + 32, H); g.fill(); }
+  } else if (id === 'melon') {
+    g.fillStyle = '#5dbb63'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#1f6b34';
+    for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(i * 43, 0); g.quadraticCurveTo(i * 43 + 16, H / 2, i * 43, H); g.lineTo(i * 43 + 12, H); g.quadraticCurveTo(i * 43 + 28, H / 2, i * 43 + 12, 0); g.fill(); }
+  } else if (id === 'ghost') {
+    g.fillStyle = '#eef1ff'; g.fillRect(0, 0, W, H);
+    g.strokeStyle = '#a79bff'; g.lineWidth = 7;
+    for (let r = 14; r < 120; r += 26) { g.beginPath(); g.arc(W / 2, H / 2, r, 0.3, 4.4); g.stroke(); }
+  } else { // 標準球：奶油色 + 橘色條紋
+    g.fillStyle = '#fff6dc'; g.fillRect(0, 0, W, H);
+    stripes('#ff7a1a', 4, 28);
+  }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  _ballTex[id] = t;
   return t;
-})();
+}
+const ballTex = ballTexture('std');
 const ballMesh = new THREE.Mesh(
   new THREE.SphereGeometry(BALL_R * 1.3, 20, 14),
   new THREE.MeshStandardMaterial({ map: ballTex, emissive: 0xffaa33, emissiveIntensity: 0.35 }),
@@ -488,7 +522,7 @@ let aiChar = charById('whirl');
 let aiBase = baseMods(aiChar, racketById('std'), ballById('std'));
 const skill = { gauge: 0, until: 0, armed: false };   // 技能槽、持續中的技能、待發動的下一球技能
 let pendingAiMiss = 0;                                // 技能讓對手下一次回球更容易失誤
-const lookWithRacket = (cfg) => ({ ...cfg, paddleColor: myRacket.color || cfg.paddleColor });
+const lookWithRacket = (cfg) => ({ ...cfg, racket: myRacket.id, paddleColor: myRacket.color || cfg.paddleColor });
 let playerCfg = loadConfig(myChar.id, myChar.look);
 let player = makeActor(lookWithRacket(playerCfg), true);
 let ai = makeActor(aiChar.look, false);
@@ -607,7 +641,9 @@ function applyPhysicsFx() {
   TUNE.restitution = base.rest;
   TUNE.slide = base.slide * (a.slide ?? 1);
   ballMesh.scale.setScalar(myBall.scale);
-  ballMesh.material.color.set(myBall.color);
+  ballMesh.material.map = ballTexture(myBall.id);
+  ballMesh.material.color.set('#ffffff'); // 顏色來自貼圖
+  ballMesh.material.needsUpdate = true;
 }
 function applyLoadout() {
   myChar = charById(loadout.char);
