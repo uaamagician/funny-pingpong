@@ -47,6 +47,7 @@ let camLevel = CAM_LEVELS[loadPref('cam2', 'near')] ? loadPref('cam2', 'near') :
 const CAM_BASE = new THREE.Vector3(0, CAM_LEVELS[camLevel].y, CAM_LEVELS[camLevel].z);
 let baseFov = 66;
 // 鏡頭導演：慢動作、頓幀、視角衝擊、傾斜、靠近來球
+let camFollowW = 0; // 鏡頭跟球的程度 0–1
 let timeScale = 1, slowT = 0, hitStop = 0, fovKick = 0, camRoll = 0, camRollTarget = 0, camApproach = 0, pointDolly = 0;
 camera.position.copy(CAM_BASE);
 camera.lookAt(0, 0.3, -0.5);
@@ -1495,6 +1496,22 @@ function frame(now) {
       look.lerp(new THREE.Vector3(lerp(replayFocus.x, ball.pos.x, 0.45), lerp(replayFocus.y, ball.pos.y, 0.5), lerp(replayFocus.z, ball.pos.z, 0.45)), e);
       fov = lerp(fov, 50, e);
     }
+    // 跟球：先用一般鏡頭算出球在畫面上的位置，快要跑出畫面（太高、太遠、太偏）時，視線轉向球並稍微拉遠
+    camera.position.copy(camPos);
+    camera.lookAt(look);
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+    _bs.copy(ballMesh.position).project(camera);
+    const over = Math.max(Math.abs(_bs.x) - 0.6, _bs.y - 0.5, -_bs.y - 0.8, 0); // 超出安全範圍多少（螢幕座標 -1~1）
+    const wantFollow = !replay && (state === 'rally' || state === 'point') && _bs.z < 1 ? clamp(over / 0.35, 0, 1) * TUNE.camFollow : 0;
+    camFollowW = lerp(camFollowW, wantFollow, 1 - Math.exp(-(wantFollow > camFollowW ? 10 : 2.5) * rawDt));
+    if (camFollowW > 0.001) {
+      look.lerp(ballMesh.position, 0.85 * camFollowW);
+      camPos.y += 0.7 * camFollowW;
+      camPos.z += 0.9 * camFollowW;
+      fov += 8 * camFollowW;
+    }
     camera.position.copy(camPos);
     camera.lookAt(look);
     camera.rotateZ(camRoll * (1 - e));
@@ -1509,5 +1526,5 @@ applyLoadout();
 requestAnimationFrame(frame);
 
 // 提供除錯用的小接口（瀏覽器 console 可用 __game 檢視狀態）
-window.__game = { profile, loadout, skill, get fxNow() { return curMods(); }, get aiChar() { return aiChar; }, activateSkill,  get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get serveStage() { return serveStage; }, get streak() { return streak; }, get arena() { return currentArena; }, ballScreen, hitR, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
+window.__game = { profile, loadout, skill, TUNE, get camFollow() { return camFollowW; }, get fxNow() { return curMods(); }, get aiChar() { return aiChar; }, activateSkill,  get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get serveStage() { return serveStage; }, get streak() { return streak; }, get arena() { return currentArena; }, ballScreen, hitR, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
 void NET_TOP;
