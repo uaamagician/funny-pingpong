@@ -658,7 +658,7 @@ function showShotInfo(shot, sim, tInfo, contact) {
   const parts = [];
   if (tInfo) parts.push(`時機${tInfo.name}`);
   if (contact) parts.push(`擊球點${contactText(contact)}`);
-  parts.push(`球速 ${Math.round(sim.speed * 3.6)} km/h`);
+  parts.push(`球速 ${Math.round((sim.pace ?? sim.speed) * 3.6)} km/h`);
   if (sim.curveCm != null) parts.push(`弧度 ${sim.curveCm} cm`);
   // 失誤的球不會預告結果（不標落點、也不寫掛網／出界）
   if (sim.landing) parts.push(`落點 ${sim.landing.zone}`);
@@ -682,7 +682,7 @@ function playerServe(s) {
   swingActor(player, new THREE.Vector3(p0.x, p0.y, p0.z), clamp(s.dx / 120, -1, 1));
   sfx.hit();
   setHint('');
-  showShotInfo(shot, { speed: Math.hypot(sv.vel.x, sv.vel.y, sv.vel.z), landing: sv.result === 'ok' && sv.landing ? { x: sv.landing.x, z: sv.landing.z, zone: zoneText(sv.landing) } : null }, null);
+  showShotInfo(shot, { speed: Math.hypot(sv.vel.x, sv.vel.z), landing: sv.result === 'ok' && sv.landing ? { x: sv.landing.x, z: sv.landing.z, zone: zoneText(sv.landing) } : null }, null);
 }
 
 function playerSwipe(s) {

@@ -57,7 +57,7 @@ const LATE_EARLY_FREE = 0.3;
  * 回傳：dx 橫向偏移(m)、dDepth 深度變化(m，正＝更深)、dClear 過網高度減少(m)。
  */
 export function contactErrors({ ox = 0, oy = 0, timingOff = 0, kind = 'drive', errMul = 1 }) {
-  const m = (KIND_RISK[kind] ?? 1) * errMul;
+  const m = (KIND_RISK[kind] ?? 1) * errMul * TUNE.errScale;
   const oxe = dead(ox), oye = dead(oy);
   const late = Math.max(0, timingOff - LATE_EARLY_FREE), early = Math.max(0, -timingOff - LATE_EARLY_FREE);
   const dx = m * 0.5 * oxe + 0.15 * clamp(timingOff / 0.8, -1, 1);
@@ -143,6 +143,7 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
   const dz = clamp(-tz + e.dDepth, 0.05, 1.9);   // 離網距離（越大越深）
   tz = -dz;
   if (!isServe) T += (1 - tq) * 0.1;
+  if (!isServe) T /= TUNE.push; // 推力：飛得更快、更有力
   tx = clamp(tx, -1.1, 1.1);                      // 超過 ±0.76 就是出界
 
   const name = kind === 'spin' ? (side > 0 ? '右旋球' : '左旋球') : KIND_NAME[kind];
@@ -155,8 +156,8 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
     target: { x: tx, y: TABLE.top + BALL_R, z: tz },
     T, spin: { top, side },
     // 太早或打在球上半 → 球被壓低（sink），過網高度不夠，會掛網
-    clearance: kind === 'smash' ? 0.02 : 0.05,
-    sink: isServe ? 0 : e.dClear * 10,
+    clearance: (kind === 'smash' ? 0.02 : 0.05) + (isServe ? 0 : TUNE.netMargin),
+    sink: isServe ? 0 : e.dClear * TUNE.sinkK,
   };
 }
 
@@ -284,7 +285,8 @@ export function describeFlight(p0, vel, spin) {
   }
   return {
     result, onTable: result === 'ok', hitNet: result === 'net',
-    speed: Math.hypot(vel.x, vel.y, vel.z), peakY: f.peakY, netClear: f.netClear,
+    speed: Math.hypot(vel.x, vel.y, vel.z), pace: Math.hypot(vel.x, vel.z), // pace = 水平球速（打起來的「推力」感）
+    peakY: f.peakY, netClear: f.netClear,
     curveCm: Math.round(maxDev * 100),
     bounceShiftCm: land ? Math.round((land.vxAfter - land.vxBefore) * 35) : 0,
     landing: land ? { x: land.x, z: land.z, zone: zoneOf(land.x, land.z).text } : null,
