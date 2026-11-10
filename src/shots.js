@@ -113,7 +113,8 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, acc 
   tz = clamp(tz, -1.55, -0.3);
 
   const name = kind === 'spin' ? (side > 0 ? '右旋球' : '左旋球') : KIND_NAME[kind];
-  const label = isServe ? '發球' : `${perfect ? '完美·' : ''}${FH ? '正手' : '反手'}${name}`;
+  // 正手／反手只影響手感，不顯示在畫面上
+  const label = isServe ? '發球' : `${perfect ? '完美·' : ''}${name}`;
   return {
     kind, hand, label, smash: kind === 'smash', perfect, quality, tq,
     target: { x: tx, y: TABLE.top + BALL_R, z: tz },

@@ -217,7 +217,7 @@ function updateHitRing() {
   el.style.top = `${p.y}px`;
   const tq = state === 'serve' ? 1 : clamp(1 - Math.abs(ball.pos.z - 1.4) / 1.1, 0, 1);
   el.classList.toggle('gold', tq > 0.8);
-  el.dataset.hand = state === 'serve' ? '發球' : (handOf(ball.pos.x, player.x) === 'FH' ? '正手' : '反手');
+  el.dataset.hand = state === 'serve' ? '發球' : '';
   // 時機圈：外圈縮到跟綠圈一樣大的那一刻就是最佳擊球時機
   const tr = $('timeRing');
   if (state === 'rally') {
