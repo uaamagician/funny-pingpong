@@ -38,32 +38,33 @@ export function timingInfo(z) {
   return { off, q: clamp(1 - a / 0.9, 0, 1), name };
 }
 
-// ───────────────────────── 失誤（沒進）模型 ─────────────────────────
-// 每一球都有機率失誤：球種越冒險、時機/準度越差，機率越高。
-// 失誤不會寫在畫面上，而是真的讓球「掛網／出界／沒過網」，再由比賽規則判定。
-const FAULT_BASE = { drive: 0.05, loop: 0.1, spin: 0.11, chop: 0.06, drop: 0.13, smash: 0.2, flick: 0.15, lift: 0.04, serve: 0.05, lob: 0.05 };
-const FAULT_MIX = {
-  smash: { net: 0.35, long: 0.45, wide: 0.2 },
-  flick: { net: 0.4, long: 0.4, wide: 0.2 },
-  loop: { long: 0.5, net: 0.3, wide: 0.2 },
-  spin: { wide: 0.5, net: 0.3, long: 0.2 },
-  drop: { net: 0.5, short: 0.5 },
-  chop: { net: 0.6, short: 0.4 },
-  drive: { net: 0.4, long: 0.3, short: 0.3 },
-  lift: { long: 0.6, wide: 0.4 },
-  lob: { long: 0.6, wide: 0.4 },
-  serve: { net: 0.4, long: 0.3, short: 0.3 },
-};
-export function faultChance(kind, quality = 1, mul = 1) {
-  return clamp((FAULT_BASE[kind] ?? 0.04) * (1 + 2 * (1 - quality)) * mul, 0, 0.55);
+// ───────────────────────── 失誤（沒進）模型：完全由你的操作決定 ─────────────────────────
+// 沒有隨機骰子。球沒進，是因為：
+//  1. 時機不對：太早 → 球偏左、太短、過網太低（容易掛網或沒過）；太晚 → 球偏右、太深（容易出界）
+//  2. 沒打在球的「甜蜜點」（球拍正中心）：偏左右 → 球偏向那一側；打在球上半 → 球壓得太低（掛網）；
+//     打在球下半 → 球飛太高太長（出界）
+// 球種越冒險（殺球、快撥、吊球），同樣的偏差會被放大得越多。
+export const SWEET = 0.4;                  // 甜蜜點半徑（占擊球圈半徑的比例），在內不會有偏差
+const KIND_RISK = { smash: 1.5, flick: 1.25, spin: 1.15, loop: 1.1, drop: 1.2, drive: 0.85, chop: 0.85, lift: 0.7, lob: 0.8, serve: 0.9 };
+const dead = (v) => Math.sign(v) * Math.max(0, Math.abs(v) - SWEET) / (1 - SWEET);
+
+/**
+ * 把「碰到球的位置」和「時機」換成落點偏差。
+ * ox：滑動路徑經過球心的左(−)右(+)偏移；oy：上(−)下(+)偏移（都以擊球圈半徑為單位）。
+ * 回傳：dx 橫向偏移(m)、dDepth 深度變化(m，正＝更深)、dClear 過網高度減少(m)。
+ */
+export function contactErrors({ ox = 0, oy = 0, timingOff = 0, kind = 'drive', errMul = 1 }) {
+  const m = (KIND_RISK[kind] ?? 1) * errMul;
+  const oxe = dead(ox), oye = dead(oy);
+  const late = Math.max(0, timingOff - 0.25), early = Math.max(0, -timingOff - 0.25);
+  const dx = m * 0.6 * oxe + 0.2 * clamp(timingOff / 0.8, -1, 1);
+  const dDepth = m * (0.65 * Math.max(0, oye) - 0.45 * Math.max(0, -oye) + 0.9 * late - 0.7 * early)
+    + (timingOff >= 0 ? 0.3 : 0.25) * timingOff;
+  const dClear = m * (0.18 * Math.max(0, -oye) + 0.3 * early); // 球被壓低的程度
+  return { dx, dDepth, dClear, sloppy: Math.max(Math.abs(oxe), Math.abs(oye)) };
 }
-export function rollFault(kind, quality = 1, mul = 1, rand = Math.random) {
-  if (rand() >= faultChance(kind, quality, mul)) return null;
-  const mix = FAULT_MIX[kind] || FAULT_MIX.drive;
-  let r = rand() * Object.values(mix).reduce((a, b) => a + b, 0);
-  for (const [k, w] of Object.entries(mix)) { r -= w; if (r <= 0) return k; }
-  return 'net';
-}
+
+const gauss = (rand) => Math.sqrt(-2 * Math.log(Math.max(1e-9, rand()))) * Math.cos(2 * Math.PI * rand());
 
 /**
  * 玩家的滑動 → 一記球。
@@ -71,12 +72,14 @@ export function rollFault(kind, quality = 1, mul = 1, rand = Math.random) {
  * - 正手：力量大、旋轉強、能殺球；反手：較穩、力量小、改用快撥。
  * - 時機偏早 → 球偏左、變短；偏晚 → 球偏右、變深（容易出界）。
  */
-export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, acc = 1, isServe = false, riskMul = 1, rand = Math.random }) {
+export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, contact = { ox: 0, oy: 0 }, isServe = false, errMul = 1, rand = () => 0.5 }) {
   const FH = hand === 'FH';
   const fwd = -s.dy;
   const tq = clamp(1 - Math.abs(timingOff) / 0.9, 0, 1);
+  const off = Math.hypot(contact.ox, contact.oy);          // 離球心多遠（0 = 正中心）
+  const acc = clamp(1 - off, 0, 1);
   const quality = isServe ? 1 : clamp(0.6 * tq + 0.4 * acc, 0, 1);
-  const perfect = !isServe && Math.abs(timingOff) < 0.2 && acc > 0.6;
+  const perfect = !isServe && Math.abs(timingOff) < 0.2 && off < SWEET + 0.05; // 時機準 + 打在甜蜜點
 
   let p = clamp((s.speed - 0.35) / 1.7, 0, 1);
   if (isServe) p = Math.min(p, 0.55);
@@ -129,26 +132,25 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, acc 
   // 往前滑：看滑動方向；往下切：看左右偏多少（直直往下就是打中間）
   let tx = fwd > 0 ? clamp(Math.atan2(s.dx, fwd) / 0.9, -1, 1) * 0.58 : clamp(s.dx / 150, -1, 1) * 0.5;
 
-  if (!isServe) {
-    tx += clamp(timingOff / 0.8, -1, 1) * 0.45;                // 偏晚→往右飄，偏早→往左飄
-    tz += timingOff < 0 ? -timingOff * 0.45 : -timingOff * 0.6; // 偏早→變短，偏晚→變深（可能出界）
-    T += (1 - tq) * 0.1;
-    const err = (1 - quality) * 0.4 * (FH ? 1 : 0.8);           // 反手比較穩
-    tx += (rand() - 0.5) * 2 * err;
-  }
-  tx = clamp(tx, -0.74, 0.74);
-  tz = clamp(tz, -1.55, -0.3);
+  // 套用時機與擊球點造成的偏差（發球只受擊球點影響）
+  const e = contactErrors({ ox: contact.ox, oy: contact.oy, timingOff: isServe ? 0 : timingOff, kind, errMul: errMul * (FH ? 1 : 0.85) });
+  tx += e.dx;
+  const dz = clamp(-tz + e.dDepth, 0.05, 1.9);   // 離網距離（越大越深）
+  tz = -dz;
+  if (!isServe) T += (1 - tq) * 0.1;
+  tx = clamp(tx, -1.1, 1.1);                      // 超過 ±0.76 就是出界
 
   const name = kind === 'spin' ? (side > 0 ? '右旋球' : '左旋球') : KIND_NAME[kind];
   // 正手／反手只影響手感，不顯示在畫面上
   const label = isServe ? '發球' : `${perfect ? '完美·' : ''}${name}`;
   return {
     kind, hand, label, smash: kind === 'smash', perfect, quality, tq,
-    fault: rollFault(kind, quality, riskMul, rand),
+    off,
     target: { x: tx, y: TABLE.top + BALL_R, z: tz },
     T, spin: { top, side },
-    // 時機太差時過網高度不足 → 可能掛網
-    clearance: (kind === 'smash' ? 0.02 : 0.05) - 0.09 * (isServe ? 0 : 1 - tq),
+    // 太早或打在球上半 → 球被壓低（sink），過網高度不夠，會掛網
+    clearance: kind === 'smash' ? 0.02 : 0.05,
+    sink: isServe ? 0 : e.dClear * 10,
   };
 }
 
@@ -176,14 +178,23 @@ export function pickAiKind({ hitY = 0.9, rally = 0, aggressive = 0.5, rand = Mat
   return 'drive';
 }
 
-export function buildAiShot(kind, err = 0.3, rand = Math.random) {
-  const fault = rollFault(kind, 1, err / 0.35, rand); // 簡單的 AI 比較容易失誤
+/**
+ * AI 的球也走同一套規則：AI 的「擊球點」和「時機」會有高斯分布的偏差，偏差大小由難度決定，
+ * 所以 AI 的失誤原因和你一樣（掛網、出界、沒過），只是由它的技術水準決定。
+ */
+export function buildAiShot(kind, skill = { sigO: 0.4, sigT: 0.3 }, rand = Math.random) {
   const d = AI_KINDS[kind] || AI_KINDS.drive;
   const range = ([a, b]) => a + (b - a) * rand();
+  const ox = gauss(rand) * skill.sigO, oy = gauss(rand) * skill.sigO, timingOff = gauss(rand) * skill.sigT;
+  const e = contactErrors({ ox, oy, timingOff, kind });
+  const x = clamp((rand() - 0.5) * 1.2 + e.dx, -1.1, 1.1);
+  const z = clamp(range(d.z) + e.dDepth, 0.05, 1.9);
   return {
-    kind, label: d.name, fault,
-    target: { x: clamp((rand() - 0.5) * 1.2 + (rand() - 0.5) * err, -0.72, 0.72), y: TABLE.top + BALL_R, z: range(d.z) },
+    kind, label: d.name,
+    target: { x, y: TABLE.top + BALL_R, z },
     T: range(d.T), spin: d.spin(rand),
+    clearance: kind === 'smash' ? 0.02 : 0.05,
+    sink: e.dClear * 10,
   };
 }
 
@@ -227,17 +238,11 @@ export function flight(p0, vel, spin, maxT = 3) {
   return { bounces, crossed, netHit, netClear, peakY, path, end: { ...b.pos }, t };
 }
 
-/** 先解出理想速度，若這球注定失誤，再把速度弄壞一點（掛網／太長／太偏／力量不足）。 */
-export function finalizeShot(p0, shot, rand = Math.random) {
+/** 解出這一記球的初速度（偏差已經反映在 target 與 clearance 裡，沒有額外的隨機破壞）。 */
+export function finalizeShot(p0, shot) {
   const sol = solveShot(p0, shot.target, shot.T, shot.spin, shot.clearance ?? (shot.smash ? 0.02 : 0.05));
   const vel = { ...sol.vel };
-  switch (shot.fault) {
-    case 'net': vel.y -= 1.4 + 0.6 * rand(); break;                        // 過網高度不夠
-    case 'long': vel.z *= 1.3 + 0.12 * rand(); vel.y += 0.3; break;         // 太長，飛出桌尾
-    case 'wide': vel.x += (rand() < 0.5 ? -1 : 1) * (1.6 + 0.7 * rand()); break; // 太偏，飛出側邊
-    case 'short': vel.z *= 0.42 + 0.12 * rand(); break;                    // 力量不足，沒過網
-    default: break;
-  }
+  vel.y -= shot.sink || 0; // 被壓低的球：出手時向下的速度更多
   return { vel, T: sol.T };
 }
 
@@ -250,17 +255,23 @@ export function classify(f, ownSign) {
 }
 
 /** 實際把這一記球飛一遍：結果、落點、弧度（側偏）、最高點、過網高度、彈起後偏移。 */
-export function simulateShot(p0, shot, rand = Math.random) {
-  const { vel } = finalizeShot(p0, shot, rand);
+export function simulateShot(p0, shot) {
+  const { vel } = finalizeShot(p0, shot);
+  return describeFlight(p0, vel, shot.spin);
+}
+
+/** 描述已知初速度的一記球（遊戲裡用實際發出去的速度，確保顯示和結果一致）。 */
+export function describeFlight(p0, vel, spin) {
   const ownSign = Math.sign(p0.z) || 1;
-  const f = flight(p0, vel, shot.spin);
+  const f = flight(p0, vel, spin);
   const result = classify(f, ownSign);
   const land = result === 'ok' ? f.bounces[0] : null;
   const end = land || f.path[f.path.length - 1];
   let maxDev = 0;
   const dz = end.z - p0.z;
+  const upto = land ? f.path.slice(0, Math.floor(land.t * 240) + 2) : f.path; // 只量到第一次落桌為止
   if (Math.abs(dz) > 0.05) {
-    for (const q of f.path) {
+    for (const q of upto) {
       const sFrac = clamp((q.z - p0.z) / dz, 0, 1);
       maxDev = Math.max(maxDev, Math.abs(q.x - (p0.x + sFrac * (end.x - p0.x))));
     }
@@ -281,7 +292,7 @@ export function simulateShot(p0, shot, rand = Math.random) {
  * 用掃描 + 模擬找最接近的組合；若這球注定失誤（fault），改挑一個會失誤的組合。
  * 回傳 { vel, own: 第一次落點, result: ok/net/out/short/illegal }
  */
-export function solveServe(p0, L, spin, fault = null, rand = Math.random) {
+export function solveServe(p0, L, spin) {
   const sgn = Math.sign(p0.z) || 1;
   const cands = [];
   for (const T1 of [0.28, 0.34, 0.4, 0.48]) {
@@ -299,22 +310,8 @@ export function solveServe(p0, L, spin, fault = null, rand = Math.random) {
       cands.push({ vel: sol.vel, own: first || null, result, err: Math.abs(lz - L.z) + 0.6 * Math.abs(lx - L.x), lz, lx });
     }
   }
-  const pool = (r) => cands.filter((c) => c.result === r).sort((a, b) => a.err - b.err);
-  const good = pool('ok');
-  const want = fault && fault !== 'wide' ? fault : null;
-  if (want) {
-    // 想要的失誤方式：net／long(out)／short
-    const list = pool(want === 'long' ? 'out' : want);
-    if (list.length) return { vel: list[0].vel, own: list[0].own, result: list[0].result };
-  }
-  if (good.length) {
-    const best = good[0];
-    if (fault === 'wide') { // 太偏：同一組速度，橫向多給一點
-      const vel = { ...best.vel, x: best.vel.x + (rand() < 0.5 ? -1 : 1) * 1.4 };
-      return { vel, own: best.own, result: 'out' };
-    }
-    return { vel: best.vel, own: best.own, result: 'ok', landing: { x: best.lx, z: best.lz } };
-  }
-  const any = cands.sort((a, b) => a.err - b.err)[0];
-  return { vel: any.vel, own: any.own, result: any.result };
+  // 選最接近目標的組合。目標若已經偏出桌面或貼網（例如打在球上半、力量過頭），自然就會失誤。
+  const legal = cands.filter((c) => c.result !== 'illegal');
+  const best = (legal.length ? legal : cands).sort((a, b) => a.err - b.err)[0];
+  return { vel: best.vel, own: best.own, result: best.result, landing: best.result === 'ok' ? { x: best.lx, z: best.lz } : null };
 }
