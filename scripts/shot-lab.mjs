@@ -162,8 +162,11 @@ function serveTable() {
   console.table(rows);
 }
 
-if (arg === 'compare') run('較早一版（太誇張）', OLD);
-run('目前設定', arg === 'compare' ? { sideA: 4.5, topG: 3.0, bounceKick: 0.5, bounceTopK: 0.18 } : {});
+if (arg === 'compare') {
+  run('較早一版（太誇張）', OLD);
+  run('上一版（幅度減半）', { sideA: 4.5, topG: 3.0, bounceKick: 0.5, bounceTopK: 0.18 });
+  run('目前設定（殺球與旋球拉大一點）', { sideA: 6.0, topG: 3.6, bounceKick: 0.7, bounceTopK: 0.18 });
+} else run('目前設定');
 timingTable();
 contactGrid();
 skillTable();
