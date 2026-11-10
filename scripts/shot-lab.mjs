@@ -1,7 +1,7 @@
 // 擊球實驗室：不開瀏覽器，直接把各種滑動 × 來球位置 × 時機丟進擊球模型，
 // 看球種、落點、弧度（側偏）、球速、過網高度。用法：npm run lab
 import { TUNE } from '../src/tuning.js';
-import { buildPlayerShot, simulateShot, handOf, timingInfo, buildAiShot, pickAiKind, KIND_NAME } from '../src/shots.js';
+import { buildPlayerShot, simulateShot, handOf, timingInfo, buildAiShot, pickAiKind, KIND_NAME, solveServe, rollFault, flight } from '../src/shots.js';
 
 const OLD = { sideA: 8, topG: 4.5, bounceKick: 1.0, bounceTopK: 0.25 }; // 上一版（太誇張）的數值
 const arg = process.argv[2];
@@ -93,8 +93,71 @@ function aiTable() {
   console.log('AI 選球比例：', Object.entries(cnt).map(([k, v]) => `${KIND_NAME[k] || k} ${Math.round(v / 20)}%`).join('、'));
 }
 
+function faultTable() {
+  console.log('\n══ 失誤實驗：玩家各球種，時機與準度隨機（每種 400 次）══');
+  const N = 400;
+  const byKind = {};
+  for (let i = 0; i < N * 6; i++) {
+    const names = Object.keys(swipes);
+    const base = swipes[names[Math.floor(Math.random() * names.length)]];
+    const s = { ...base, speed: base.speed * (0.8 + Math.random() * 0.5), curve: base.curve + (Math.random() - 0.5) * 0.03 };
+    const bx = (Math.random() - 0.5) * 1.2;
+    const p0 = { x: bx, y: 0.75 + Math.random() * 0.5, z: 0.9 + Math.random() * 1.0 };
+    const t = timingInfo(p0.z);
+    const acc = 0.3 + Math.random() * 0.7;
+    const shot = buildPlayerShot({ swipe: s, p0, hand: handOf(bx, 0.6 * bx), timingOff: t.off, acc });
+    const r = simulateShot(p0, shot);
+    const k = shot.kind;
+    byKind[k] ??= { n: 0, ok: 0, net: 0, out: 0, short: 0 };
+    byKind[k].n++; byKind[k][r.result]++;
+  }
+  const rows = Object.entries(byKind).map(([k, v]) => ({ 球種: KIND_NAME[k] || k, 次數: v.n, 進: `${Math.round(v.ok / v.n * 100)}%`, 掛網: `${Math.round(v.net / v.n * 100)}%`, 出界: `${Math.round(v.out / v.n * 100)}%`, 沒過: `${Math.round(v.short / v.n * 100)}%` }));
+  console.table(rows);
+  const tot = Object.values(byKind).reduce((a, v) => ({ n: a.n + v.n, ok: a.ok + v.ok }), { n: 0, ok: 0 });
+  console.log(`整體進球率 ${Math.round(tot.ok / tot.n * 100)}%`);
+
+  console.log('\n══ 失誤實驗：AI 各難度（各 7 種球 × 300 次）══');
+  const rows2 = [];
+  for (const [dn, err] of [['簡單', 0.55], ['普通', 0.35], ['困難', 0.18]]) {
+    const c = { n: 0, ok: 0, net: 0, out: 0, short: 0 };
+    for (const kind of ['drive', 'loop', 'spin', 'chop', 'drop', 'smash', 'lob']) {
+      for (let i = 0; i < 300; i++) {
+        const p0 = { x: (Math.random() - 0.5) * 1.2, y: 0.9, z: -1.4 };
+        const r = simulateShot(p0, buildAiShot(kind, err));
+        c.n++; c[r.result]++;
+      }
+    }
+    rows2.push({ 難度: dn, 進: `${Math.round(c.ok / c.n * 100)}%`, 掛網: `${Math.round(c.net / c.n * 100)}%`, 出界: `${Math.round(c.out / c.n * 100)}%`, 沒過: `${Math.round(c.short / c.n * 100)}%` });
+  }
+  console.table(rows2);
+}
+
+function serveTable() {
+  console.log('\n══ 發球實驗：先落自己半桌再過網（各 400 次）══');
+  const rows = [];
+  for (const [who, z0, sgn] of [['玩家發球', 2.65, -1], ['AI 發球', -2.65, 1]]) {
+    const c = { ok: 0, net: 0, out: 0, short: 0, illegal: 0 };
+    let ownZ = 0, errSum = 0, errN = 0, minOwn = 9, maxOwn = 0;
+    for (let i = 0; i < 400; i++) {
+      const p0 = { x: (Math.random() - 0.5) * 0.6, y: 1.05, z: z0 };
+      const L = { x: (Math.random() - 0.5) * 1.2, y: 0.8, z: sgn * (0.45 + Math.random() * 0.75) };
+      const spin = { top: Math.random() * 0.5, side: (Math.random() - 0.5) * 0.8 };
+      const fault = rollFault('serve', 1);
+      const r = solveServe(p0, L, spin, fault);
+      c[r.result]++;
+      if (r.own) { ownZ += Math.abs(r.own.z); minOwn = Math.min(minOwn, Math.abs(r.own.z)); maxOwn = Math.max(maxOwn, Math.abs(r.own.z)); }
+      if (r.result === 'ok' && r.landing) { errSum += Math.hypot(r.landing.x - L.x, r.landing.z - L.z); errN++; }
+    }
+    rows.push({ 發球方: who, 合法進: `${Math.round(c.ok / 4)}%`, 掛網: `${Math.round(c.net / 4)}%`, 出界: `${Math.round(c.out / 4)}%`, 沒過: `${Math.round(c.short / 4)}%`, 沒先落己方: `${Math.round(c.illegal / 4)}%`,
+      '自己半桌落點z(最小~最大)': `${minOwn.toFixed(2)}~${maxOwn.toFixed(2)}`, '平均落點誤差cm': errN ? Math.round(errSum / errN * 100) : '-' });
+  }
+  console.table(rows);
+}
+
 if (arg === 'compare') { run('上一版（太誇張）', OLD); }
 run('目前設定', arg === 'compare' ? { sideA: 4.5, topG: 3.0, bounceKick: 0.5, bounceTopK: 0.18 } : {});
 timingTable();
 handTable();
 aiTable();
+faultTable();
+serveTable();
