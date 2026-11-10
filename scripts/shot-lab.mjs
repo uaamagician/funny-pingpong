@@ -60,7 +60,7 @@ function timingTable() {
 
 function contactGrid() {
   console.log('\n══ 擊球點實驗：同一顆球、時機完美，只改「滑過球的哪個位置」（○進 網 界 短）══');
-  console.log('橫軸 = 左右偏移(ox，單位：擊球圈半徑)；縱軸 = 上下偏移(oy，負＝球的上半、正＝球的下半)');
+  console.log('橫軸 = 左右偏移(ox，單位：擊球圈半徑)；縱軸 = 球落在這一劃的哪一段(oy：負＝起手段、正＝收尾段，0 = 中段最準)');
   for (const kind of ['平擊(中速直滑)', '上旋拉球(快一點)', '殺球(快速猛滑)', '吊球(慢直滑)']) {
     const s = { '平擊(中速直滑)': swipes['中速直滑'], '上旋拉球(快一點)': { dx: 0, dy: -150, len: 150, dur: 130, curve: 0, speed: 150 / 130 }, '殺球(快速猛滑)': swipes['快速猛滑'], '吊球(慢直滑)': swipes['慢直滑'] }[kind];
     const p0 = { x: 0, y: 1.05, z: TUNE.idealZ };
