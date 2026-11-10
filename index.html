@@ -33,6 +33,7 @@
     .shotinfo { position:absolute; display:none; flex-direction:column; align-items:center; gap:2px; left:50%; top:calc(env(safe-area-inset-top) + 82px); transform:translateX(-50%); background:rgba(20,10,45,.82); border:2px solid rgba(255,255,255,.25); border-radius:14px; padding:6px 14px; pointer-events:none; z-index:2; max-width:92vw; text-align:center; }
     .shotinfo b { font-size:17px; color:#ffd23f; }
     .shotinfo span { font-size:12px; opacity:.9; }
+    .hitring::before { content:''; position:absolute; inset:30%; border:2px dashed rgba(255,255,255,.75); border-radius:50%; } /* 甜蜜點：滑過這裡最準 */
     .hitring.gold { border-color:#ffd23f; box-shadow:0 0 22px #ffd23f, inset 0 0 16px rgba(255,210,63,.55); }
     .hitring.touch { background:rgba(255,255,255,.25); }
     @keyframes ringpulse { from { opacity:.65; scale:.94; } to { opacity:1; scale:1.04; } }
