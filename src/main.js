@@ -40,9 +40,9 @@ scene.fog = new THREE.Fog(0x1b1033, 9, 22);
 
 const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 60);
 // 視角距離：近／中／遠（玩家可在比賽畫面右上角切換，會記住）
-const CAM_LEVELS = { near: { y: 3.5, z: 5.3, label: '近' }, mid: { y: 3.9, z: 5.9, label: '中' }, far: { y: 4.5, z: 6.8, label: '遠' } };
+const CAM_LEVELS = { near: { y: 3.1, z: 4.5, label: '近' }, mid: { y: 3.6, z: 5.3, label: '中' }, far: { y: 4.5, z: 6.8, label: '遠' } };
 const CAM_ORDER = ['near', 'mid', 'far'];
-let camLevel = CAM_LEVELS[loadPref('cam', 'mid')] ? loadPref('cam', 'mid') : 'mid';
+let camLevel = CAM_LEVELS[loadPref('cam2', 'near')] ? loadPref('cam2', 'near') : 'near'; // 預設「近」
 const CAM_BASE = new THREE.Vector3(0, CAM_LEVELS[camLevel].y, CAM_LEVELS[camLevel].z);
 let baseFov = 66;
 // 鏡頭導演：慢動作、頓幀、視角衝擊、傾斜、靠近來球
@@ -959,7 +959,7 @@ $('camBtn').addEventListener('click', () => {
   camLevel = CAM_ORDER[(CAM_ORDER.indexOf(camLevel) + 1) % CAM_ORDER.length];
   CAM_BASE.set(0, CAM_LEVELS[camLevel].y, CAM_LEVELS[camLevel].z);
   $('camBtn').textContent = `視角：${CAM_LEVELS[camLevel].label}`;
-  savePref('cam', camLevel);
+  savePref('cam2', camLevel);
 });
 function setHud(on) {
   $('hud').classList.toggle('hidden', !on);
@@ -1183,8 +1183,8 @@ function frame(now) {
     const sx = (Math.random() - 0.5) * shake * 0.14, sy = (Math.random() - 0.5) * shake * 0.14;
     const camPos = new THREE.Vector3(
       CAM_BASE.x + clamp(ball.pos.x, -1.6, 1.6) * 0.32 + sx,
-      CAM_BASE.y - 0.8 * camApproach - 0.7 * TUNE.pointDolly * pointDolly + sy,
-      CAM_BASE.z - 1.0 * camApproach - 1.4 * TUNE.pointDolly * pointDolly,
+      CAM_BASE.y - 0.5 * camApproach - 0.5 * TUNE.pointDolly * pointDolly + sy,
+      CAM_BASE.z - 0.6 * camApproach - 0.9 * TUNE.pointDolly * pointDolly,
     );
     const ly = 0.4 + clamp(ball.pos.y - 0.8, 0, 1) * 0.25;
     const look = new THREE.Vector3(
