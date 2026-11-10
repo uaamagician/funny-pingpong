@@ -3,178 +3,210 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#10151c" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2713%27 fill=%27%23ffd23f%27/%3E%3C/svg%3E" />
+  <meta name="theme-color" content="#0a0f1a" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2713%27 fill=%27%23ff7a2f%27/%3E%3C/svg%3E" />
   <title>乒乓大亂鬥</title>
   <style>
-    :root { --gold:#f2b134; --pink:#4fb3a5; --ink:#10151c; }
-    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body { margin:0; height:100%; background:var(--ink); overflow:hidden; font-family: -apple-system, "PingFang TC", "Noto Sans TC", system-ui, sans-serif; color:#fff; }
+    /* ───────── 設計系統：深藍底、橘色主色、薄荷綠表示正向、斜切角面板、粗斜體數字 ───────── */
+    :root {
+      --bg:#0a0f1a; --panel:rgba(14,21,36,.9); --panel-2:rgba(24,34,56,.92);
+      --stroke:rgba(255,255,255,.12); --text:#eef3fb; --muted:#8a97b1;
+      --accent:#ff7a2f; --accent-d:#d9560f; --mint:#35e0a1; --blue:#3d8bff; --red:#ff4d63;
+      --cut:polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+      --cut-s:polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+      --gold:#ff7a2f; --pink:#35e0a1; --ink:#0a0f1a;
+    }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html, body { margin:0; height:100%; background:var(--bg); overflow:hidden; color:var(--text);
+      font-family:"SF Pro Display",-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif; font-variant-numeric:tabular-nums; }
     #app { position:fixed; inset:0; touch-action:none; user-select:none; -webkit-user-select:none; }
     canvas { display:block; width:100%; height:100%; touch-action:none; }
-    .hud { position:absolute; left:0; right:0; top:0; padding:calc(env(safe-area-inset-top) + 10px) 16px 0; display:flex; justify-content:center; pointer-events:none; }
-    .score { display:flex; align-items:center; gap:14px; background:rgba(20,10,45,.7); border:2px solid rgba(255,255,255,.18); border-radius:18px; padding:6px 18px; font-weight:900; }
-    .score b { font-size:34px; min-width:28px; text-align:center; }
-    .score small { display:block; font-size:11px; opacity:.7; font-weight:600; text-align:center; }
-    .score .sep { font-size:24px; opacity:.6; }
-    .serve-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--gold); margin-left:4px; visibility:hidden; }
+    svg.i { width:1em; height:1em; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+    .hidden { display:none !important; }
+
+    /* ───────── 比賽 HUD ───────── */
+    .hud { position:absolute; left:0; right:0; top:0; padding:calc(env(safe-area-inset-top) + 10px) 62px 0; display:flex; justify-content:center; pointer-events:none; }
+    .score { display:flex; align-items:stretch; filter:drop-shadow(0 4px 10px rgba(0,0,0,.45)); }
+    .plate { display:flex; align-items:center; gap:7px; min-width:92px; height:46px; padding:0 12px; position:relative; }
+    .plate b { font-size:30px; font-weight:900; font-style:italic; line-height:1; min-width:26px; text-align:center; }
+    .plate .pname { font-size:12px; font-weight:700; letter-spacing:.02em; opacity:.92; max-width:54px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .plate.me { background:linear-gradient(100deg,#1f63d6,#3d8bff); clip-path:polygon(0 0,100% 0,calc(100% - 12px) 100%,0 100%); padding-right:22px; justify-content:flex-start; }
+    .plate.foe { background:linear-gradient(260deg,#e0392d,#ff7a2f); clip-path:polygon(12px 0,100% 0,100% 100%,0 100%); padding-left:22px; justify-content:flex-end; }
+    .vs { width:30px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:900; font-style:italic; letter-spacing:.08em; background:#0c1322; color:var(--muted); }
+    .serve-dot { width:8px; height:8px; border-radius:50%; background:#fff; box-shadow:0 0 8px #fff; visibility:hidden; flex:none; }
     .serve-dot.on { visibility:visible; }
-    .rally { position:absolute; top:calc(env(safe-area-inset-top) + 74px); left:0; right:0; text-align:center; font-size:13px; opacity:.75; pointer-events:none; }
-    .pop { position:absolute; left:0; right:0; top:30%; text-align:center; font-size:44px; font-weight:900; color:var(--gold); text-shadow:0 4px 0 #8a3a00, 0 0 24px rgba(255,150,0,.7); pointer-events:none; opacity:0; transform:scale(.5); }
-    .pop.show { animation: pop 1s ease-out forwards; }
-    @keyframes pop { 0%{opacity:0;transform:scale(.4) rotate(-6deg)} 15%{opacity:1;transform:scale(1.2) rotate(3deg)} 30%{transform:scale(1) rotate(0)} 80%{opacity:1} 100%{opacity:0;transform:scale(1) translateY(-30px)} }
+    .score.drill .plate { min-width:96px; }
+    .plate.neutral { background:linear-gradient(100deg,#222c44,#34415f); clip-path:polygon(0 0,100% 0,calc(100% - 12px) 100%,0 100%); padding-right:22px; }
+    .plate.neutral2 { background:linear-gradient(260deg,#222c44,#34415f); clip-path:polygon(12px 0,100% 0,100% 100%,0 100%); padding-left:22px; justify-content:flex-end; }
+    .plate small { font-size:10px; font-weight:800; letter-spacing:.1em; color:var(--muted); text-transform:uppercase; }
+    .roundbtn { position:absolute; top:calc(env(safe-area-inset-top) + 12px); height:44px; display:flex; align-items:center; justify-content:center; gap:6px; color:#fff; font-size:13px; font-weight:800;
+      background:var(--panel); border:0; box-shadow:inset 0 0 0 1px var(--stroke); clip-path:var(--cut-s); z-index:3; }
+    .roundbtn svg.i { font-size:20px; }
+    #quitBtn { left:12px; width:44px; }
+    #camBtn { right:10px; padding:0 10px; }
+    .rally { position:absolute; top:calc(env(safe-area-inset-top) + 66px); left:0; right:0; text-align:center; font-size:12px; font-weight:800; letter-spacing:.12em; color:var(--gold); text-shadow:0 1px 4px #000; pointer-events:none; }
+    .windtag { position:absolute; display:none; right:12px; top:calc(env(safe-area-inset-top) + 64px); font-size:12px; font-weight:800; letter-spacing:.06em; background:var(--panel); box-shadow:inset 0 0 0 1px var(--stroke); padding:4px 10px; clip-path:var(--cut-s); pointer-events:none; }
+
+    /* 技能鈕：圓形、環形充能、中間是圖示，下面是技能名稱 */
+    .skillbtn { position:absolute; left:16px; bottom:calc(env(safe-area-inset-bottom) + 104px); width:72px; height:72px; border-radius:50%; border:0; padding:0; color:#fff; z-index:3;
+      background:radial-gradient(circle at 50% 35%, #26324f, #121a2e 70%); box-shadow:0 6px 16px rgba(0,0,0,.5), inset 0 0 0 2px rgba(255,255,255,.1); }
+    .skillbtn::before { content:''; position:absolute; inset:-5px; border-radius:50%; padding:5px;
+      background:conic-gradient(var(--ring,var(--accent)) var(--p,0%), rgba(255,255,255,.14) 0);
+      -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude; }
+    .skillbtn .ico { position:absolute; inset:0; margin:auto; font-size:30px; opacity:.55; transition:opacity .2s, transform .2s; }
+    .skillbtn b { position:absolute; left:50%; top:calc(100% + 6px); transform:translateX(-50%); white-space:nowrap; font-size:12px; font-weight:800; letter-spacing:.04em; text-shadow:0 1px 4px #000; pointer-events:none; }
+    .skillbtn.ready { --ring:var(--mint); box-shadow:0 0 0 2px rgba(53,224,161,.35), 0 0 22px rgba(53,224,161,.55), 0 6px 16px rgba(0,0,0,.5); animation:ready 1s ease-in-out infinite alternate; }
+    .skillbtn.ready .ico { opacity:1; color:var(--mint); transform:scale(1.1); }
+    .skillbtn.active { --ring:var(--accent); }
+    .skillbtn.active .ico { opacity:1; color:var(--accent); }
+    @keyframes ready { to { transform:scale(1.06); } }
+
+    /* 擊球圈／時機圈／滑動軌跡 */
     .swipefx { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; }
-    .hitring { position:absolute; display:none; transform:translate(-50%,-50%); border:4px solid #7dff9a; border-radius:50%; box-shadow:0 0 18px #7dff9a, inset 0 0 14px rgba(125,255,154,.45); pointer-events:none; z-index:1; animation:ringpulse .5s ease-in-out infinite alternate; }
-    .hitring::after { content:attr(data-hand); position:absolute; top:-26px; left:50%; transform:translateX(-50%); font-weight:900; font-size:14px; color:#fff; text-shadow:0 2px 0 #000; white-space:nowrap; }
-    .timering { position:absolute; display:none; transform:translate(-50%,-50%); border:3px solid rgba(255,255,255,.85); border-radius:50%; pointer-events:none; z-index:1; }
-    .timering.perfect { border-color:#ffd23f; box-shadow:0 0 14px #ffd23f; }
-    .timering::after { content:attr(data-t); position:absolute; bottom:-24px; left:50%; transform:translateX(-50%); font-size:13px; font-weight:800; color:#fff; text-shadow:0 2px 0 #000; white-space:nowrap; }
-    .timering.perfect::after { color:#ffd23f; }
-    .shotinfo { position:absolute; display:none; flex-direction:column; align-items:center; gap:2px; left:50%; top:calc(env(safe-area-inset-top) + 82px); transform:translateX(-50%); background:rgba(20,10,45,.82); border:2px solid rgba(255,255,255,.25); border-radius:14px; padding:6px 14px; pointer-events:none; z-index:2; max-width:92vw; text-align:center; }
-    .shotinfo b { font-size:17px; color:#ffd23f; }
-    .shotinfo span { font-size:12px; opacity:.9; }
-    .hitring::before { content:''; position:absolute; inset:30%; border:2px dashed rgba(255,255,255,.75); border-radius:50%; } /* 甜蜜點：滑過這裡最準 */
-    .hitring.gold { border-color:#ffd23f; box-shadow:0 0 22px #ffd23f, inset 0 0 16px rgba(255,210,63,.55); }
-    .hitring.touch { background:rgba(255,255,255,.25); }
-    @keyframes ringpulse { from { opacity:.65; scale:.94; } to { opacity:1; scale:1.04; } }
-    .replaytag { position:absolute; display:none; left:50%; top:calc(env(safe-area-inset-top) + 82px); transform:translateX(-50%); background:rgba(20,10,45,.8); border:2px solid #ffd23f; color:#ffd23f; font-weight:900; padding:6px 16px; border-radius:999px; font-size:15px; pointer-events:none; z-index:2; white-space:nowrap; }
-    .replaytag small { color:#fff; opacity:.75; font-weight:600; }
-    .spintag { position:absolute; display:none; transform:translateX(-50%); font-weight:900; font-size:20px; text-shadow:0 2px 0 #000, 0 0 10px currentColor; pointer-events:none; white-space:nowrap; z-index:2; }
-    .hint { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom) + 18px); text-align:center; font-size:14px; opacity:.85; pointer-events:none; padding:0 24px; text-shadow:0 2px 6px #000; }
-    .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; background:radial-gradient(ellipse at center, rgba(60,20,110,.85), rgba(15,5,35,.95)); padding:24px; text-align:center; }
-    .overlay.hidden { display:none; }
-    h1 { margin:0; font-size:48px; line-height:1.05; font-weight:900; color:#fff; text-shadow:0 5px 0 var(--pink), 0 0 30px rgba(255,79,139,.6); transform:rotate(-3deg); }
-    .sub { opacity:.8; font-size:14px; margin-bottom:8px; }
-    .btn { appearance:none; border:3px solid #3a1d00; background:linear-gradient(#ffe27a,var(--gold)); color:#3a1d00; font-weight:900; font-size:20px; padding:14px 40px; border-radius:18px; box-shadow:0 6px 0 #8a5a00; cursor:pointer; }
-    .btn:active { transform:translateY(4px); box-shadow:0 2px 0 #8a5a00; }
-    .btn.alt { background:linear-gradient(#ff8fb4,var(--pink)); color:#fff; border-color:#4a0020; box-shadow:0 6px 0 #8a1040; }
-    .diff { display:flex; gap:8px; }
-    .diff button { appearance:none; border:2px solid rgba(255,255,255,.3); background:rgba(255,255,255,.08); color:#fff; padding:8px 16px; border-radius:12px; font-size:15px; font-weight:700; }
-    .diff button.on { background:var(--pink); border-color:#fff; }
-    .profile { background:rgba(255,255,255,.12); border:2px solid rgba(255,255,255,.25); border-radius:999px; padding:6px 16px; font-size:14px; font-weight:700; margin-bottom:6px; }
-    .profile small { opacity:.7; font-weight:600; margin-right:6px; }
-    .hud.hidden { display:none; }
+    .hitring { position:absolute; display:none; transform:translate(-50%,-50%); border:3px solid #fff; border-radius:50%; box-shadow:0 0 0 1px rgba(0,0,0,.35), 0 0 12px rgba(255,255,255,.45); pointer-events:none; z-index:1; animation:ringpulse .55s ease-in-out infinite alternate; }
+    .hitring::before { content:''; position:absolute; inset:30%; border:2px solid rgba(255,255,255,.7); border-radius:50%; }
+    .hitring::after { content:attr(data-hand); position:absolute; top:-24px; left:50%; transform:translateX(-50%); font-weight:800; font-size:12px; letter-spacing:.08em; color:#fff; text-shadow:0 1px 3px #000; white-space:nowrap; }
+    .hitring.gold { border-color:var(--gold); box-shadow:0 0 0 1px rgba(0,0,0,.35), 0 0 16px rgba(255,122,47,.8); }
+    .hitring.touch { background:rgba(255,255,255,.22); }
+    .timering { position:absolute; display:none; transform:translate(-50%,-50%); border:2px solid rgba(255,255,255,.8); border-radius:50%; pointer-events:none; z-index:1; }
+    .timering.perfect { border-color:var(--mint); box-shadow:0 0 12px rgba(53,224,161,.7); }
+    .timering::after { content:attr(data-t); position:absolute; bottom:-22px; left:50%; transform:translateX(-50%); font-size:12px; font-weight:800; letter-spacing:.06em; color:#fff; text-shadow:0 1px 3px #000; white-space:nowrap; }
+    .timering.perfect::after { color:var(--mint); }
+    @keyframes ringpulse { from { opacity:.7; scale:.96; } to { opacity:1; scale:1.03; } }
+
+    /* 文字提示：粗斜體、描邊，不使用發光 */
+    .pop { position:absolute; left:0; right:0; top:30%; text-align:center; font-size:38px; font-weight:900; font-style:italic; letter-spacing:.02em; color:var(--gold);
+      -webkit-text-stroke:2px rgba(0,0,0,.6); paint-order:stroke fill; text-shadow:0 4px 12px rgba(0,0,0,.5); pointer-events:none; opacity:0; }
+    .pop.show { animation:pop 1s cubic-bezier(.2,.9,.3,1) forwards; }
+    @keyframes pop { 0%{opacity:0;transform:translateX(-30px) skewX(-8deg)} 18%{opacity:1;transform:translateX(0) skewX(-8deg)} 80%{opacity:1;transform:translateX(0) skewX(-8deg)} 100%{opacity:0;transform:translateX(24px) skewX(-8deg)} }
+    .shotinfo { position:absolute; display:none; flex-direction:column; align-items:flex-start; gap:2px; left:50%; top:calc(env(safe-area-inset-top) + 82px); transform:translateX(-50%); padding:7px 14px 7px 16px;
+      background:var(--panel); box-shadow:inset 3px 0 0 var(--accent), inset 0 0 0 1px var(--stroke); clip-path:var(--cut-s); pointer-events:none; z-index:2; max-width:92vw; }
+    .shotinfo b { font-size:15px; font-weight:900; font-style:italic; }
+    .shotinfo span { font-size:11px; color:var(--muted); }
+    .replaytag { position:absolute; display:none; left:50%; top:calc(env(safe-area-inset-top) + 82px); transform:translateX(-50%); padding:6px 16px; font-size:13px; font-weight:900; font-style:italic; letter-spacing:.1em; color:#fff;
+      background:linear-gradient(100deg,var(--accent-d),var(--accent)); clip-path:var(--cut-s); pointer-events:none; z-index:2; white-space:nowrap; }
+    .replaytag small { font-weight:600; font-style:normal; opacity:.85; letter-spacing:0; }
+    .spintag { position:absolute; display:none; transform:translateX(-50%); font-weight:900; font-style:italic; font-size:18px; -webkit-text-stroke:1.5px rgba(0,0,0,.6); paint-order:stroke fill; pointer-events:none; white-space:nowrap; z-index:2; }
+    .hint { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom) + 16px); text-align:center; font-size:13px; color:#dfe6f3; pointer-events:none; padding:0 24px; text-shadow:0 1px 6px #000; }
+
+    /* ───────── 全螢幕畫面（選單、對練、結果）：透明漸層，露出後面的 3D 場景 ───────── */
+    .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:stretch; justify-content:flex-end; gap:10px; padding:calc(env(safe-area-inset-top) + 20px) 18px calc(env(safe-area-inset-bottom) + 22px);
+      background:linear-gradient(180deg, rgba(7,11,20,.82) 0%, rgba(7,11,20,.25) 38%, rgba(7,11,20,.9) 100%); }
+    .overlay .top { margin-bottom:auto; display:flex; flex-direction:column; gap:10px; }
+    .brand { display:flex; flex-direction:column; gap:2px; }
+    .brand small { font-size:11px; font-weight:800; letter-spacing:.34em; color:var(--accent); }
+    h1 { margin:0; font-size:46px; line-height:1.05; font-weight:900; font-style:italic; letter-spacing:.02em; text-shadow:0 4px 18px rgba(0,0,0,.5); }
+    .slash { width:96px; height:5px; background:linear-gradient(100deg,var(--accent) 0 70%,transparent 70% 76%,var(--accent) 76%); transform:skewX(-30deg); margin-top:6px; }
+    h2 { margin:0; font-size:28px; font-weight:900; font-style:italic; }
+    .profile { align-self:flex-start; display:inline-flex; align-items:center; gap:8px; padding:6px 14px 6px 10px; font-size:13px; font-weight:700; background:var(--panel); box-shadow:inset 0 0 0 1px var(--stroke); clip-path:var(--cut-s); }
+    .profile small { font-size:10px; font-weight:800; letter-spacing:.1em; color:var(--bg); background:var(--mint); padding:1px 6px; }
+    .sub { color:var(--muted); font-size:13px; }
+    .btn { appearance:none; border:0; cursor:pointer; color:#1a0b00; font-size:19px; font-weight:900; font-style:italic; letter-spacing:.04em; padding:16px 24px; min-height:56px; display:flex; align-items:center; justify-content:center; gap:10px;
+      background:linear-gradient(180deg,#ff9448,var(--accent) 55%,var(--accent-d)); clip-path:var(--cut); box-shadow:inset 0 1px 0 rgba(255,255,255,.35); }
+    .btn svg.i { font-size:22px; }
+    .btn:active { filter:brightness(.92); transform:translateY(1px); }
+    .btn.alt, .btn.gray { color:var(--text); background:var(--panel-2); box-shadow:inset 0 0 0 1px var(--stroke); font-style:normal; font-weight:800; font-size:16px; }
+    .btn.alt { box-shadow:inset 0 0 0 1px rgba(255,255,255,.4); background:transparent; }
+    .btn.small { min-height:46px; padding:10px 14px; font-size:15px; flex:1; clip-path:var(--cut-s); }
+    .tiles { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .tile { appearance:none; border:0; color:var(--text); text-align:left; padding:12px 14px; display:flex; flex-direction:column; gap:6px; min-height:84px; cursor:pointer;
+      background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.02)), var(--panel); box-shadow:inset 0 0 0 1px var(--stroke); clip-path:var(--cut); }
+    .tile svg.i { font-size:24px; color:var(--accent); }
+    .tile b { font-size:15px; font-weight:800; }
+    .tile span { font-size:11px; color:var(--muted); }
+    .tile:active { filter:brightness(1.15); }
+    .tile.wide { grid-column:1 / -1; min-height:64px; flex-direction:row; align-items:center; gap:12px; }
+    .diff { display:grid; grid-template-columns:repeat(3,1fr); gap:0; background:var(--panel); box-shadow:inset 0 0 0 1px var(--stroke); clip-path:var(--cut-s); }
+    .diff button { appearance:none; border:0; background:transparent; color:var(--muted); padding:12px 0; font-size:15px; font-weight:800; }
+    .diff button.on { background:linear-gradient(180deg,#ff9448,var(--accent)); color:#1a0b00; font-style:italic; }
+    .card { appearance:none; border:0; width:100%; text-align:left; color:var(--text); padding:16px 16px 16px 18px; display:flex; flex-direction:column; gap:4px; cursor:pointer;
+      background:linear-gradient(100deg,rgba(255,122,47,.18),rgba(255,122,47,0) 70%), var(--panel); box-shadow:inset 3px 0 0 var(--accent), inset 0 0 0 1px var(--stroke); clip-path:var(--cut); }
+    .card b { font-size:20px; font-weight:900; font-style:italic; }
+    .card span { font-size:12px; color:var(--muted); }
+    .help { font-size:12px; line-height:1.7; color:var(--muted); padding:12px 14px; background:var(--panel); box-shadow:inset 0 0 0 1px var(--stroke); clip-path:var(--cut-s); }
+    .help b { color:var(--text); }
+    .result-title { font-size:72px; font-weight:900; font-style:italic; line-height:1; margin:0; text-shadow:0 6px 24px rgba(0,0,0,.5); }
+    #overScore { font-size:34px; font-weight:900; font-style:italic; color:var(--accent); }
+
+    /* ───────── 底部面板（出賽準備、造型、場地） ───────── */
     .editor { position:absolute; left:0; right:0; bottom:0; }
-    .editor.hidden { display:none; }
-    .sheet { max-height:46vh; overflow-y:auto; background:rgba(20,10,45,.94); border-top:2px solid rgba(255,255,255,.2); border-radius:22px 22px 0 0; padding:14px 16px calc(env(safe-area-inset-bottom) + 14px); -webkit-overflow-scrolling:touch; touch-action:pan-y; }
-    .sheet h3 { margin:6px 0 8px; font-size:15px; color:var(--gold); }
+    .sheet { max-height:46vh; overflow-y:auto; background:var(--panel); box-shadow:inset 0 1px 0 var(--stroke); padding:14px 16px calc(env(safe-area-inset-bottom) + 14px); -webkit-overflow-scrolling:touch; touch-action:pan-y; clip-path:polygon(0 14px,14px 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%); }
+    #loadout .sheet { max-height:62vh; }
+    .sheet h3 { margin:6px 0 8px; font-size:12px; font-weight:800; letter-spacing:.2em; color:var(--accent); }
     .sheet .row { display:flex; align-items:center; gap:12px; margin:8px 0; font-size:14px; }
-    .sheet .row > span:first-child { width:72px; flex:none; opacity:.9; }
-    .sheet input[type=range] { flex:1; accent-color:var(--pink); height:28px; }
-    .sheet input[type=checkbox] { width:22px; height:22px; accent-color:var(--pink); }
-    .swatches { display:flex; flex-wrap:wrap; gap:8px; }
-    .sheet .row.sw > span:first-child { width:40px; }
-    .swatches { gap:6px; flex:1; }
-    .swatch { width:27px; height:27px; border-radius:50%; border:3px solid rgba(255,255,255,.25); padding:0; }
-    .swatch.on { border-color:#fff; box-shadow:0 0 0 2px var(--pink); }
-    .bar { display:flex; gap:10px; margin-top:14px; position:sticky; bottom:-14px; padding:10px 0 4px; background:linear-gradient(transparent, rgba(20,10,45,.97) 30%); }
-    .btn.small { flex:1; font-size:16px; padding:10px 0; border-radius:14px; box-shadow:0 4px 0 #8a5a00; }
-    .btn.small.alt { box-shadow:0 4px 0 #8a1040; }
-    .btn.gray { background:linear-gradient(#b9b3c9,#8f88a3); color:#fff; border-color:#2a2540; box-shadow:0 4px 0 #4a4560; }
-    .score.hidden { display:none; }
-    .quit { position:absolute; left:12px; top:calc(env(safe-area-inset-top) + 14px); width:40px; height:40px; border-radius:50%; border:2px solid rgba(255,255,255,.3); background:rgba(20,10,45,.7); color:#fff; font-size:18px; z-index:3; }
-    .quit.hidden { display:none; }
-    .camtoggle { position:absolute; right:12px; top:calc(env(safe-area-inset-top) + 14px); height:40px; padding:0 14px; border-radius:20px; border:2px solid rgba(255,255,255,.3); background:rgba(20,10,45,.7); color:#fff; font-size:14px; font-weight:700; z-index:3; }
-    .camtoggle.hidden { display:none; }
-    h2 { margin:0; font-size:34px; font-weight:900; text-shadow:0 4px 0 var(--pink); }
-    .card { appearance:none; width:min(320px,100%); text-align:left; border:3px solid rgba(255,255,255,.25); background:linear-gradient(135deg, rgba(255,79,139,.35), rgba(76,201,240,.25)); color:#fff; border-radius:18px; padding:14px 16px; display:flex; flex-direction:column; gap:4px; }
-    .card b { font-size:20px; }
-    .card span { font-size:13px; opacity:.85; }
-    .card:active { transform:scale(.98); }
-    .arena { appearance:none; width:100%; display:flex; align-items:center; gap:12px; text-align:left; margin:8px 0; padding:10px 12px; border-radius:14px; border:3px solid rgba(255,255,255,.18); background:rgba(255,255,255,.06); color:#fff; }
-    .arena.on { border-color:var(--gold); background:rgba(255,210,63,.12); }
-    .arena .sw4 { display:grid; grid-template-columns:1fr 1fr; width:48px; height:48px; border-radius:10px; overflow:hidden; flex:none; }
+    .sheet .row > span:first-child { width:72px; flex:none; color:var(--muted); }
+    .sheet input[type=range] { flex:1; accent-color:var(--accent); height:28px; }
+    .sheet input[type=checkbox] { width:22px; height:22px; accent-color:var(--accent); }
+    .swatches { display:flex; flex-wrap:wrap; gap:6px; flex:1; }
+    .sheet .row.sw > span:first-child, .row.chips > span:first-child { width:40px; }
+    .swatch { width:27px; height:27px; border-radius:6px; border:2px solid rgba(255,255,255,.2); padding:0; }
+    .swatch.on { box-shadow:0 0 0 2px var(--accent); border-color:#fff; }
+    .chipwrap { display:flex; flex-wrap:wrap; gap:6px; flex:1; }
+    .chip { appearance:none; border:0; color:var(--text); background:var(--panel-2); box-shadow:inset 0 0 0 1px var(--stroke); padding:6px 11px; font-size:13px; font-weight:700; clip-path:var(--cut-s); }
+    .chip.on { background:var(--accent); color:#1a0b00; }
+    .bar { display:flex; gap:10px; margin-top:14px; position:sticky; bottom:-14px; padding:10px 0 4px; background:linear-gradient(transparent, rgba(14,21,36,.98) 30%); }
+    .arena { appearance:none; width:100%; display:flex; align-items:center; gap:12px; text-align:left; margin:8px 0; padding:10px 12px; color:var(--text); border:0; background:var(--panel-2); box-shadow:inset 0 0 0 1px var(--stroke); clip-path:var(--cut-s); }
+    .arena.on { box-shadow:inset 3px 0 0 var(--accent), inset 0 0 0 1px rgba(255,122,47,.5); background:rgba(255,122,47,.1); }
+    .arena .sw4 { display:grid; grid-template-columns:1fr 1fr; width:48px; height:48px; overflow:hidden; flex:none; }
     .arena .sw4 i { display:block; }
     .arena .at { display:flex; flex-direction:column; gap:2px; }
-    .arena small { opacity:.75; font-size:12px; }
-    .help { font-size:13px; opacity:.8; line-height:1.7; max-width:320px; text-align:left; background:rgba(0,0,0,.25); padding:10px 14px; border-radius:12px; }
+    .arena small { color:var(--muted); font-size:12px; }
 
-    /* 簡潔主題：單一暖色重點色、平面按鈕、不使用霓虹發光與漸層 */
-    .score { border:1px solid rgba(255,255,255,.14); border-radius:12px; background:rgba(16,21,28,.72); }
-    .pop { font-size:34px; text-shadow:0 2px 10px rgba(0,0,0,.65); }
-    @keyframes pop { 0%{opacity:0;transform:scale(.8)} 18%{opacity:1;transform:scale(1.06)} 35%{transform:scale(1)} 80%{opacity:1} 100%{opacity:0;transform:translateY(-24px)} }
-    .hitring { border-width:3px; box-shadow:0 0 8px rgba(125,255,154,.55); }
-    .hitring.gold { box-shadow:0 0 10px rgba(242,177,52,.7); border-color:var(--gold); }
-    .hitring::after, .timering::after { text-shadow:0 1px 3px #000; }
-    .timering.perfect { border-color:var(--gold); box-shadow:0 0 8px rgba(242,177,52,.6); }
-    .timering.perfect::after { color:var(--gold); }
-    .shotinfo { border:1px solid rgba(255,255,255,.16); border-radius:10px; background:rgba(16,21,28,.8); }
-    .shotinfo b { color:var(--gold); font-size:16px; }
-    .replaytag { border:1px solid rgba(242,177,52,.8); background:rgba(16,21,28,.82); color:var(--gold); font-weight:700; }
-    .spintag { text-shadow:0 1px 4px #000; }
-    .overlay { background:radial-gradient(ellipse at 50% 20%, rgba(30,40,54,.97), rgba(12,16,22,.98)); }
-    h1 { font-size:42px; letter-spacing:.06em; text-shadow:none; transform:none; margin-bottom:10px; }
-    h2 { text-shadow:none; font-size:28px; }
-    .btn { border:none; background:var(--gold); color:#1a1200; font-size:18px; font-weight:800; padding:14px 44px; border-radius:14px; box-shadow:none; min-width:220px; }
-    .btn:active { transform:scale(.98); box-shadow:none; }
-    .btn.alt { background:transparent; color:#fff; border:1.5px solid rgba(255,255,255,.38); box-shadow:none; }
-    .btn.gray { background:rgba(255,255,255,.1); color:#fff; border:none; box-shadow:none; }
-    .btn.small { box-shadow:none !important; min-width:0; padding:11px 0; font-size:15px; }
-    .diff button { border:1px solid rgba(255,255,255,.25); background:transparent; }
-    .diff button.on { background:var(--gold); color:#1a1200; border-color:var(--gold); }
-    .profile { border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.06); font-weight:600; }
-    .card { border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.05); border-radius:14px; }
-    .card b { font-size:18px; }
-    .sheet { background:rgba(16,21,28,.97); border-top:1px solid rgba(255,255,255,.14); border-radius:16px 16px 0 0; }
-    .sheet h3 { color:var(--gold); font-weight:700; }
-    .swatch { border:2px solid rgba(255,255,255,.22); }
-    .swatch.on { box-shadow:0 0 0 2px var(--gold); border-color:#fff; }
-    .bar { background:linear-gradient(transparent, rgba(16,21,28,.98) 30%); }
-    .arena { border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.05); }
-    .arena.on { border-color:var(--gold); background:rgba(242,177,52,.1); }
-    .quit, .camtoggle { border:1px solid rgba(255,255,255,.22); background:rgba(16,21,28,.7); }
-
-    .skillbtn { position:absolute; left:12px; bottom:calc(env(safe-area-inset-bottom) + 64px); min-width:150px; height:44px; padding:0 14px; border-radius:12px; border:1px solid rgba(255,255,255,.22); background:rgba(16,21,28,.78); color:#fff; font-size:14px; font-weight:700; z-index:3; overflow:hidden; }
-    .skillbtn.hidden { display:none; }
-    .skillbtn .fill { position:absolute; left:0; top:0; bottom:0; width:var(--p,0%); background:rgba(242,177,52,.28); transition:width .15s; }
-    .skillbtn b { position:relative; font-weight:700; }
-    .skillbtn.ready { border-color:var(--gold); background:rgba(242,177,52,.22); animation:ringpulse .6s ease-in-out infinite alternate; }
-    .skillbtn.active { border-color:var(--gold); }
-    .windtag { position:absolute; display:none; right:12px; top:calc(env(safe-area-inset-top) + 66px); font-size:13px; font-weight:700; background:rgba(16,21,28,.7); border:1px solid rgba(255,255,255,.18); border-radius:8px; padding:3px 10px; pointer-events:none; }
-    #loadout .sheet { max-height:62vh; }
+    /* 出賽準備 */
     .charcard { display:flex; align-items:center; gap:8px; margin:6px 0; }
-    .charcard .cc { flex:1; text-align:center; display:flex; flex-direction:column; gap:2px; }
-    .charcard .cc b { font-size:22px; }
-    .charcard .cc small { opacity:.7; font-size:13px; }
-    .nav { width:44px; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.06); color:#fff; font-size:26px; line-height:1; }
-    .stats { display:flex; flex-direction:column; gap:5px; margin:8px 0; }
-    .srow { display:flex; align-items:center; gap:10px; font-size:13px; }
-    .srow span { width:38px; opacity:.85; }
-    .sbar { flex:1; height:8px; border-radius:4px; background:rgba(255,255,255,.1); overflow:hidden; }
-    .sbar i { display:block; height:100%; background:var(--gold); border-radius:4px; }
-    .sbar i.up { background:#7bd389; } .sbar i.down { background:#e76f51; }
-    .srow b { width:18px; text-align:right; font-weight:700; }
+    .charcard .cc { flex:1; text-align:center; display:flex; flex-direction:column; gap:3px; align-items:center; }
+    .charcard .cc b { font-size:26px; font-weight:900; font-style:italic; line-height:1.1; }
+    .charcard .cc small { font-size:11px; font-weight:800; letter-spacing:.12em; color:var(--bg); background:var(--accent); padding:1px 10px; transform:skewX(-14deg); }
+    .nav { width:46px; height:46px; border:0; color:var(--text); font-size:26px; line-height:1; background:var(--panel-2); box-shadow:inset 0 0 0 1px var(--stroke); clip-path:var(--cut-s); }
+    .stats { display:flex; flex-direction:column; gap:6px; margin:10px 0; }
+    .srow { display:flex; align-items:center; gap:10px; font-size:12px; font-weight:700; }
+    .srow span { width:36px; color:var(--muted); }
+    .sbar { flex:1; height:10px; background:rgba(255,255,255,.07); transform:skewX(-20deg); -webkit-mask:repeating-linear-gradient(90deg,#000 0 calc(10% - 3px),transparent calc(10% - 3px) 10%); mask:repeating-linear-gradient(90deg,#000 0 calc(10% - 3px),transparent calc(10% - 3px) 10%); }
+    .sbar i { display:block; height:100%; background:linear-gradient(90deg,var(--accent-d),var(--accent)); }
+    .sbar i.up { background:linear-gradient(90deg,#1fb985,var(--mint)); } .sbar i.down { background:linear-gradient(90deg,#c43d3d,var(--red)); }
+    .srow b { width:18px; text-align:right; font-style:italic; font-weight:900; }
     .note { margin:6px 0; font-size:13px; line-height:1.5; }
-    .note.dim { opacity:.65; font-size:12px; }
+    .note.dim { color:var(--muted); font-size:12px; }
     .picks { display:flex; gap:10px; margin:10px 0 4px; }
-    .picks > div { flex:1; display:flex; flex-direction:column; gap:4px; font-size:12px; opacity:.95; }
-    .pickbtn { appearance:none; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.06); color:#fff; border-radius:10px; padding:10px 6px; font-size:14px; font-weight:700; }
-
-    .chipwrap { display:flex; flex-wrap:wrap; gap:6px; flex:1; }
-    .chip { appearance:none; border:1px solid rgba(255,255,255,.22); background:transparent; color:#fff; border-radius:8px; padding:6px 10px; font-size:13px; font-weight:600; }
-    .chip.on { background:var(--gold); color:#1a1200; border-color:var(--gold); }
-    .row.chips > span:first-child { width:40px; }
+    .picks > div { flex:1; display:flex; flex-direction:column; gap:4px; font-size:11px; font-weight:800; letter-spacing:.12em; color:var(--muted); }
+    .pickbtn { appearance:none; border:0; color:var(--text); background:var(--panel-2); box-shadow:inset 0 0 0 1px var(--stroke); padding:11px 6px; font-size:14px; font-weight:800; letter-spacing:0; clip-path:var(--cut-s); }
   </style>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+      <symbol id="i-cam" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+      <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L5 14h6l-1 8 8-12h-6z"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol>
+      <symbol id="i-court" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="1"/><path d="M12 6v12M3 12h18"/></symbol>
+      <symbol id="i-shirt" viewBox="0 0 24 24"><path d="M8 4l-5 3 2 4 3-1v10h8V10l3 1 2-4-5-3a4 4 0 01-8 0z"/></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+      <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".8"/></symbol>
+      <symbol id="i-bot" viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="11" rx="2"/><path d="M12 8V4M9 13h.01M15 13h.01M9 16h6"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></symbol>
+    </defs>
+  </svg>
+
   <div id="app">
     <div class="hud hidden" id="hud">
       <div class="score match">
-        <div><small>你<span class="serve-dot" id="dotP"></span></small><b id="sP">0</b></div>
-        <span class="sep">:</span>
-        <div><small><span id="nameA">對手</span><span class="serve-dot" id="dotA"></span></small><b id="sA">0</b></div>
+        <div class="plate me"><i class="serve-dot" id="dotP"></i><span class="pname">你</span><b id="sP">0</b></div>
+        <div class="vs">VS</div>
+        <div class="plate foe"><b id="sA">0</b><span class="pname" id="nameA">對手</span><i class="serve-dot" id="dotA"></i></div>
       </div>
       <div class="score drill hidden" id="drillHud">
-        <div><small>連續命中</small><b id="sStreak">0</b></div>
-        <span class="sep">|</span>
-        <div><small>最佳</small><b id="sBest">0</b></div>
+        <div class="plate neutral"><small>連續命中</small><b id="sStreak">0</b></div>
+        <div class="vs">/</div>
+        <div class="plate neutral2"><b id="sBest">0</b><small>最佳</small></div>
       </div>
     </div>
-    <button class="quit hidden" id="quitBtn" aria-label="離開">✕</button>
-    <button class="camtoggle hidden" id="camBtn" aria-label="切換視角距離">視角：中</button>
+    <button class="roundbtn hidden" id="quitBtn" aria-label="離開"><svg class="i"><use href="#i-close"/></svg></button>
+    <button class="roundbtn hidden" id="camBtn" aria-label="切換視角距離"><svg class="i"><use href="#i-cam"/></svg><span id="camLabel">近</span></button>
     <div class="rally" id="rally"></div>
     <div class="windtag" id="windTag"></div>
-    <button class="skillbtn hidden" id="skillBtn"><span class="fill"></span><b>技能</b></button>
+    <button class="skillbtn hidden" id="skillBtn" aria-label="技能"><svg class="i ico"><use href="#i-bolt"/></svg><b>技能</b></button>
     <canvas class="swipefx" id="swipeFx"></canvas>
     <div class="timering" id="timeRing"></div>
     <div class="hitring" id="hitRing"></div>
@@ -185,16 +217,22 @@
     <div class="hint" id="hint"></div>
 
     <div class="overlay" id="menu">
-      <h1>乒乓大亂鬥</h1>
-      <div class="profile" id="profile"></div>
-      <button class="btn" id="practiceBtn">AI 對練</button>
-      <button class="btn alt" id="editBtn">改造型</button>
-      <button class="btn gray" id="arenaBtn">場地：<span id="arenaName"></span></button>
+      <div class="top">
+        <div class="brand"><small>TABLE TENNIS</small><h1>乒乓大亂鬥</h1><div class="slash"></div></div>
+        <div class="profile" id="profile"></div>
+      </div>
+      <button class="btn" id="practiceBtn"><svg class="i"><use href="#i-play"/></svg>AI 對練</button>
+      <div class="tiles">
+        <button class="tile" id="editBtn"><svg class="i"><use href="#i-shirt"/></svg><b>改造型</b><span>臉、服裝、配件</span></button>
+        <button class="tile" id="arenaBtn"><svg class="i"><use href="#i-court"/></svg><b>場地</b><span id="arenaName"></span></button>
+      </div>
     </div>
 
     <div class="overlay hidden" id="practice">
-      <h2>AI 對練</h2>
-      <div class="sub">難度</div>
+      <div class="top">
+        <h2>AI 對練</h2>
+        <div class="sub">選擇難度與模式</div>
+      </div>
       <div class="diff" id="diff">
         <button data-d="easy">簡單</button>
         <button data-d="normal" class="on">普通</button>
@@ -203,13 +241,11 @@
       <button class="card" id="matchBtn"><b>對戰 AI</b><span>11 分制、輪流發球，完整比賽</span></button>
       <button class="card" id="drillBtn"><b>發球機練習</b><span>無限發球、不計分，專心練手感與旋球</span></button>
       <div class="help">
-        <b>發球：</b>點一下球拋起，落下時再點或滑過球打出去（往上滑＝上旋、往下滑＝下旋、劃弧線＝側旋）<br/>
-        <b>接球：</b>球彈起、出現綠圈時，<b>點一下球＝平擊</b>，或滑過球擊球（越準越好）<br/>
-        <b>殺球：</b>球在高處時快速猛滑<br/>
-        <b>旋球：</b>滑動時劃出弧線（左弧／右弧）<br/>
-        <b>吊球：</b>輕輕短滑　<b>切球：</b>向下滑
+        <b>發球</b>　點一下球拋起，落下時再點或滑過球（上滑＝上旋、下滑＝下旋、弧線＝側旋）<br/>
+        <b>接球</b>　出現圈圈時，<b>點一下球＝平擊</b>，或滑過球擊球，越準越好<br/>
+        <b>殺球</b>　球在高處時快速猛滑　<b>吊球</b>　輕輕短滑　<b>切球</b>　向下滑
       </div>
-      <button class="btn gray" id="practiceBack">返回</button>
+      <button class="btn gray" id="practiceBack"><svg class="i"><use href="#i-back"/></svg>返回</button>
     </div>
 
     <div class="editor hidden" id="arenaSheet"></div>
@@ -230,22 +266,21 @@
         <p class="note" id="charPassive"></p>
         <p class="note" id="charSkill"></p>
         <div class="picks">
-          <div><span>球拍</span><button class="pickbtn" id="racketBtn"></button></div>
-          <div><span>球</span><button class="pickbtn" id="ballBtn"></button></div>
+          <div>球拍<button class="pickbtn" id="racketBtn"></button></div>
+          <div>球<button class="pickbtn" id="ballBtn"></button></div>
         </div>
         <p class="note dim" id="gearDesc"></p>
         <p class="note dim" id="arenaFx"></p>
         <div class="bar">
-          <button class="btn small gray" id="loadoutBack">返回</button>
+          <button class="btn gray small" id="loadoutBack">返回</button>
           <button class="btn small" id="goBtn">開始</button>
         </div>
       </div>
     </div>
 
     <div class="overlay hidden" id="over">
-      <h1 id="overTitle">勝利!</h1>
-      <div class="sub" id="overScore"></div>
-      <button class="btn alt" id="againBtn">再來一局</button>
+      <div class="top"><div class="sub">比賽結束</div><h1 class="result-title" id="overTitle">勝利</h1><div id="overScore"></div></div>
+      <button class="btn" id="againBtn">再來一局</button>
     </div>
   </div>
   <script type="module" src="/src/main.js"></script>

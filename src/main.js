@@ -771,7 +771,7 @@ function startPoint() {
   if (server === 'player') {
     ball.pos = { x: player.x, y: 1.05, z: PLAYER_Z - 0.35 };
     lastHitter = 'player';
-    setHint('發球：點一下球拋起，落下時再點或滑過球打出去；也可以直接滑過球發球');
+    setHint('點球拋起，落下時再點或滑過球發球');
   } else {
     ball.pos = { x: ai.x, y: 1.05, z: AI_Z + 0.35 };
     lastHitter = 'ai';
@@ -808,7 +808,7 @@ function award(winner, why) {
     state = 'over';
     setTimeout(() => {
       if (state !== 'over') return;
-      $('overTitle').textContent = a > b ? '你贏了！' : '你輸了…';
+      $('overTitle').textContent = a > b ? '勝利' : '落敗';
       $('overScore').textContent = `${a} : ${b}`;
       showScreen('over');
     }, (rdur > 0 ? rdur + 0.9 : 1.4) * 1000);
@@ -1195,11 +1195,11 @@ const profile = getProfile();
 function showScreen(id) { // id 為 null 時全部隱藏
   for (const x of ['menu', 'practice', 'over']) $(x).classList.toggle('hidden', x !== id);
 }
-$('camBtn').textContent = `視角：${CAM_LEVELS[camLevel].label}`;
+$('camLabel').textContent = CAM_LEVELS[camLevel].label;
 $('camBtn').addEventListener('click', () => {
   camLevel = CAM_ORDER[(CAM_ORDER.indexOf(camLevel) + 1) % CAM_ORDER.length];
   CAM_BASE.set(0, CAM_LEVELS[camLevel].y, CAM_LEVELS[camLevel].z);
-  $('camBtn').textContent = `視角：${CAM_LEVELS[camLevel].label}`;
+  $('camLabel').textContent = CAM_LEVELS[camLevel].label;
   savePref('cam2', camLevel);
 });
 function setHud(on) {
