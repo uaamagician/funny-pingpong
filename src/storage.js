@@ -3,17 +3,18 @@ import { DEFAULT_CONFIG, sanitizeConfig } from './character.js';
 
 const KEY = 'pp.character.v1';
 
-export function loadConfig() {
+// 每個角色各自存一份外觀（沒改過就用角色預設外觀）
+export function loadConfig(id = 'default', fallback = DEFAULT_CONFIG) {
   try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? sanitizeConfig(JSON.parse(raw)) : { ...DEFAULT_CONFIG };
+    const raw = localStorage.getItem(`${KEY}.${id}`);
+    return raw ? sanitizeConfig(JSON.parse(raw), fallback) : sanitizeConfig(fallback, DEFAULT_CONFIG);
   } catch {
-    return { ...DEFAULT_CONFIG };
+    return sanitizeConfig(fallback, DEFAULT_CONFIG);
   }
 }
 
-export function saveConfig(cfg) {
-  try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch { /* 無痕模式等情況：略過 */ }
+export function saveConfig(cfg, id = 'default') {
+  try { localStorage.setItem(`${KEY}.${id}`, JSON.stringify(cfg)); } catch { /* 無痕模式等情況：略過 */ }
 }
 
 // 其他簡單偏好設定（場地、難度等）

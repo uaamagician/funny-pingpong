@@ -192,8 +192,8 @@ export const COLOR_KEYS = {
 };
 
 /** 把任意（可能被竄改或過期的）資料整理成合法的角色設定。 */
-export function sanitizeConfig(o) {
-  const out = { ...DEFAULT_CONFIG };
+export function sanitizeConfig(o, base = DEFAULT_CONFIG) {
+  const out = { ...base };
   if (!o || typeof o !== 'object') return out;
   for (const k of Object.keys(COLOR_KEYS)) {
     if (typeof o[k] === 'string' && /^#[0-9a-fA-F]{6}$/.test(o[k])) out[k] = o[k];

@@ -10,6 +10,15 @@ export const ARENAS = {
     decor: { pillars: false, beams: false, ring: false },
     swatch: ['#151a21', '#2c5a4c', '#1b4f8f', '#e3ebf5'],
   },
+  ice: {
+    name: '冰原', desc: '冰面球館：球落桌後跑得更快',
+    bg: 0x0f1d2a, fog: [10, 26], hemi: [0xdaf0ff, 0x203446], sun: 0xeaf6ff, rim: 0x8fd3ff,
+    floor: 0x1a2c3d, court: 0x2d4a63, table: 0x1b4f8f, ring: 0x8fd3ff,
+    beams: [0xbfe6ff, 0xbfe6ff, 0xbfe6ff, 0xbfe6ff],
+    pillar: 0x142230, hue: [0.55, 0.6], sat: 0.3, light: 0.1, stars: false,
+    decor: { pillars: false, beams: true, ring: false },
+    swatch: ['#0f1d2a', '#2d4a63', '#1b4f8f', '#bfe6ff'],
+  },
   neon: {
     name: '紫夜競技場', desc: '霓虹聚光燈的夜間賽場',
     bg: 0x1b1033, fog: [9, 22], hemi: [0xcfd8ff, 0x2a1450], sun: 0xffffff, rim: 0xff4f8b,
