@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#1b1033" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2713%27 fill=%27%23ffd23f%27/%3E%3C/svg%3E" />
   <title>乒乓大亂鬥</title>
   <style>
     :root { --gold:#ffd23f; --pink:#ff4f8b; --ink:#1b1033; }
@@ -33,12 +34,30 @@
     .diff { display:flex; gap:8px; }
     .diff button { appearance:none; border:2px solid rgba(255,255,255,.3); background:rgba(255,255,255,.08); color:#fff; padding:8px 16px; border-radius:12px; font-size:15px; font-weight:700; }
     .diff button.on { background:var(--pink); border-color:#fff; }
+    .hud.hidden { display:none; }
+    .editor { position:absolute; left:0; right:0; bottom:0; }
+    .editor.hidden { display:none; }
+    .sheet { max-height:46vh; overflow-y:auto; background:rgba(20,10,45,.94); border-top:2px solid rgba(255,255,255,.2); border-radius:22px 22px 0 0; padding:14px 16px calc(env(safe-area-inset-bottom) + 14px); -webkit-overflow-scrolling:touch; touch-action:pan-y; }
+    .sheet h3 { margin:6px 0 8px; font-size:15px; color:var(--gold); }
+    .sheet .row { display:flex; align-items:center; gap:12px; margin:8px 0; font-size:14px; }
+    .sheet .row > span:first-child { width:72px; flex:none; opacity:.9; }
+    .sheet input[type=range] { flex:1; accent-color:var(--pink); height:28px; }
+    .sheet input[type=checkbox] { width:22px; height:22px; accent-color:var(--pink); }
+    .swatches { display:flex; flex-wrap:wrap; gap:8px; }
+    .sheet .row.sw > span:first-child { width:40px; }
+    .swatches { gap:6px; flex:1; }
+    .swatch { width:27px; height:27px; border-radius:50%; border:3px solid rgba(255,255,255,.25); padding:0; }
+    .swatch.on { border-color:#fff; box-shadow:0 0 0 2px var(--pink); }
+    .bar { display:flex; gap:10px; margin-top:14px; position:sticky; bottom:-14px; padding:10px 0 4px; background:linear-gradient(transparent, rgba(20,10,45,.97) 30%); }
+    .btn.small { flex:1; font-size:16px; padding:10px 0; border-radius:14px; box-shadow:0 4px 0 #8a5a00; }
+    .btn.small.alt { box-shadow:0 4px 0 #8a1040; }
+    .btn.gray { background:linear-gradient(#b9b3c9,#8f88a3); color:#fff; border-color:#2a2540; box-shadow:0 4px 0 #4a4560; }
     .help { font-size:13px; opacity:.8; line-height:1.7; max-width:320px; text-align:left; background:rgba(0,0,0,.25); padding:10px 14px; border-radius:12px; }
   </style>
 </head>
 <body>
   <div id="app">
-    <div class="hud">
+    <div class="hud" id="hud">
       <div class="score">
         <div><small>你<span class="serve-dot" id="dotP"></span></small><b id="sP">0</b></div>
         <span class="sep">:</span>
@@ -58,6 +77,7 @@
         <button data-d="hard">困難</button>
       </div>
       <button class="btn" id="startBtn">開始比賽</button>
+      <button class="btn alt" id="editBtn">改造型</button>
       <div class="help">
         <b>發球：</b>向上滑動（左右決定方向）<br/>
         <b>接球：</b>球彈起來後往前滑動擊球<br/>
@@ -66,6 +86,8 @@
         <b>吊球：</b>輕輕短滑 <b>切球：</b>向下滑
       </div>
     </div>
+
+    <div class="editor hidden" id="editor"></div>
 
     <div class="overlay hidden" id="over">
       <h1 id="overTitle">勝利!</h1>

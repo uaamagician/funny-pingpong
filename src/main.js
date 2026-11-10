@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { buildCharacter, randomConfig, stretchArm, DEFAULT_CONFIG } from './character.js';
 import { TABLE, BALL_R, NET_TOP, makeBall, stepBall, bounceOnTable, solveShot } from './physics.js';
 import { sfx, unlockAudio } from './audio.js';
+import { createEditor } from './editor.js';
+import { loadConfig, saveConfig } from './storage.js';
 
 // ───────────────────────── 基本設定 ─────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -23,7 +25,8 @@ let diff = DIFFS.normal;
 const app = $('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = false;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 app.insertBefore(renderer.domElement, app.firstChild);
 
 const scene = new THREE.Scene();
@@ -38,6 +41,10 @@ camera.lookAt(0, 0.4, -0.3);
 scene.add(new THREE.HemisphereLight(0xcfd8ff, 0x2a1450, 1.1));
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(3, 6, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5, near: 1, far: 18 });
+sun.shadow.bias = -0.0005;
 scene.add(sun);
 const rim = new THREE.PointLight(0xff4f8b, 25, 14);
 rim.position.set(-3, 3, -3);
@@ -49,7 +56,26 @@ const floor = new THREE.Mesh(
   new THREE.MeshStandardMaterial({ color: 0x2c1a55, roughness: 0.9 }),
 );
 floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
 scene.add(floor);
+// 比賽場地地墊與聚光燈光束
+const court = new THREE.Mesh(
+  new THREE.PlaneGeometry(4.6, 8.4),
+  new THREE.MeshToonMaterial({ color: 0x4a2f8f }),
+);
+court.rotation.x = -Math.PI / 2;
+court.position.y = 0.004;
+court.receiveShadow = true;
+scene.add(court);
+for (const [x, c] of [[-2.6, 0xff4f8b], [2.6, 0x4cc9f0], [-1.1, 0xffd23f], [1.1, 0x9b5de5]]) {
+  const beam = new THREE.Mesh(
+    new THREE.ConeGeometry(1.1, 7, 24, 1, true),
+    new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  beam.position.set(x, 3.5, -3.5);
+  beam.rotation.z = x * -0.05;
+  scene.add(beam);
+}
 const ring = new THREE.Mesh(
   new THREE.RingGeometry(5.2, 5.4, 64),
   new THREE.MeshBasicMaterial({ color: 0xff4f8b, side: THREE.DoubleSide }),
@@ -73,6 +99,8 @@ for (let i = 0; i < 9; i++) {
 const tableMat = new THREE.MeshStandardMaterial({ color: 0x1f5fb8, roughness: 0.5 });
 const tableTop = new THREE.Mesh(new THREE.BoxGeometry(TABLE.halfW * 2, 0.04, TABLE.halfL * 2), tableMat);
 tableTop.position.y = TABLE.top - 0.02;
+tableTop.castShadow = true;
+tableTop.receiveShadow = true;
 scene.add(tableTop);
 const whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
 const lineMid = new THREE.Mesh(new THREE.PlaneGeometry(0.012, TABLE.halfL * 2), whiteMat);
@@ -141,12 +169,37 @@ function makeActor(cfg, isPlayer) {
   c.baseZ = isPlayer ? PLAYER_Z : AI_Z;
   return c;
 }
-const player = makeActor(DEFAULT_CONFIG, true);
+let playerCfg = loadConfig();
+let player = makeActor(playerCfg, true);
 const ai = makeActor(randomConfig(), false);
-// 玩家的大頭擋住視線，所以讓它半透明（從背後看不到臉，不影響造型）
-player.head.traverse((o) => {
-  if (o.material) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.35; o.material.depthWrite = false; }
-});
+
+// 比賽時玩家的大頭會擋住視線，所以讓它半透明；編輯造型時要完全不透明
+function setHeadGhost(c, ghost) {
+  c.head.traverse((o) => {
+    if (!o.material) return;
+    o.material.transparent = ghost;
+    o.material.opacity = ghost ? 0.35 : 1;
+    o.material.depthWrite = !ghost;
+    o.material.needsUpdate = true;
+    if (o.userData.outline) o.visible = !ghost; // 半透明時不要黑色描邊
+  });
+}
+function disposeActor(c) {
+  for (const o of [c.group, c.paddle, c.arm]) {
+    scene.remove(o);
+    o.traverse((m) => { m.geometry?.dispose(); m.material?.dispose?.(); });
+  }
+}
+function rebuildPlayer(cfg) {
+  const x = player.x;
+  disposeActor(player);
+  player = makeActor(cfg, true);
+  player.x = x;
+  if (state === 'editor') player.group.rotation.y = 0;
+  else setHeadGhost(player, true);
+  window.__game && (window.__game.player = player);
+}
+setHeadGhost(player, true);
 
 function swingActor(c, toPos, dirX = 0, dur = 0.3) {
   c.swing = { t: 0, to: toPos.clone(), dirX, dur };
@@ -159,8 +212,11 @@ function updateActor(c, dt, time) {
   c.body.position.y = Math.abs(Math.sin(time * 5 + (c.isPlayer ? 0 : 1))) * 0.035;
   c.head.rotation.z = Math.sin(time * 3 + (c.isPlayer ? 0 : 2)) * 0.07;
 
-  const fwd = c.isPlayer ? -1 : 1; // 面向球網的方向
-  const rest = new THREE.Vector3(c.x + (c.isPlayer ? 0.5 : 0.5), 1.0, c.baseZ + fwd * 0.55);
+  g.updateMatrixWorld(true);
+  c.shoulder.getWorldPosition(_v);
+  const fwd = Math.cos(g.rotation.y) >= 0 ? 1 : -1; // 面向 +z 或 -z
+  const handSide = Math.sign(_v.x - c.x) || 1;      // 球拍手在畫面哪一側
+  const rest = new THREE.Vector3(c.x + handSide * 0.5, 1.0, c.baseZ + fwd * 0.55);
   const pos = rest.clone();
   let tilt = 0;
   if (c.swing) {
@@ -176,13 +232,11 @@ function updateActor(c, dt, time) {
   }
   c.paddle.position.copy(pos);
   c.paddle.rotation.set(-0.25 * fwd, 0, -tilt * 0.6);
-  g.updateMatrixWorld(true);
-  c.shoulder.getWorldPosition(_v);
   stretchArm(c.arm, _v.clone(), pos.clone().add(new THREE.Vector3(0, -0.08, 0)));
 }
 
 // ───────────────────────── 比賽狀態 ─────────────────────────
-let state = 'menu'; // menu | serve | rally | point | over
+let state = 'menu'; // menu | editor | serve | rally | point | over
 let score = { player: 0, ai: 0 };
 let server = 'player';
 let firstServer = 'player';
@@ -476,7 +530,7 @@ function endSwipe(e) {
   const s = analyzeSwipe(pts);
   pts = null;
   if (s.len < 12) s.len = 12; // 輕點也算一次很輕的推擊
-  if (state === 'menu' || state === 'over') return;
+  if (state === 'menu' || state === 'over' || state === 'editor') return;
   playerSwipe(s);
 }
 cv.addEventListener('pointerup', endSwipe);
@@ -504,6 +558,36 @@ function newMatch() {
   startPoint();
 }
 $('startBtn').addEventListener('click', newMatch);
+
+// 角色編輯：鏡頭轉到玩家正面，下半部顯示編輯面板
+const editor = createEditor($('editor'), {
+  getConfig: () => ({ ...playerCfg }),
+  onChange: (cfg) => { playerCfg = { ...cfg }; rebuildPlayer(playerCfg); },
+  onClose: (cfg) => {
+    playerCfg = { ...cfg };
+    saveConfig(playerCfg);
+    state = 'menu';
+    editor.close();
+    player.group.rotation.y = Math.PI;
+    setHeadGhost(player, true);
+    ballMesh.visible = shadow.visible = true;
+    $('menu').classList.remove('hidden');
+    $('hud').classList.remove('hidden');
+  },
+});
+$('editBtn').addEventListener('click', () => {
+  unlockAudio();
+  state = 'editor';
+  $('menu').classList.add('hidden');
+  $('hud').classList.add('hidden');
+  setHint('');
+  player.x = 0;
+  player.group.rotation.y = 0;
+  setHeadGhost(player, false);
+  ballMesh.visible = shadow.visible = false;
+  trail.forEach((t) => { t.material.opacity = 0; });
+  editor.open();
+});
 $('againBtn').addEventListener('click', newMatch);
 
 // ───────────────────────── 主迴圈 ─────────────────────────
@@ -570,12 +654,18 @@ function frame(now) {
 
   // 鏡頭：輕微跟隨球 + 殺球震動
   shake = Math.max(0, shake - dt);
-  camera.position.set(
-    CAM_BASE.x + ball.pos.x * 0.12 + (Math.random() - 0.5) * shake * 0.12,
-    CAM_BASE.y + (Math.random() - 0.5) * shake * 0.12,
-    CAM_BASE.z,
-  );
-  camera.lookAt(ball.pos.x * 0.25, 0.4, -0.3);
+  if (state === 'editor') {
+    // 對準玩家正面；角色放在畫面上半部，下半部留給編輯面板
+    camera.position.set(Math.sin(time * 0.6) * 0.25, 1.3, PLAYER_Z + 4.0);
+    camera.lookAt(0, -0.1, PLAYER_Z);
+  } else {
+    camera.position.set(
+      CAM_BASE.x + ball.pos.x * 0.12 + (Math.random() - 0.5) * shake * 0.12,
+      CAM_BASE.y + (Math.random() - 0.5) * shake * 0.12,
+      CAM_BASE.z,
+    );
+    camera.lookAt(ball.pos.x * 0.25, 0.4, -0.3);
+  }
 
   renderer.render(scene, camera);
   requestAnimationFrame(frame);

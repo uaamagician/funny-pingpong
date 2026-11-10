@@ -39,7 +39,29 @@ export function randomConfig() {
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
-const mat = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.65, metalness: 0.05 });
+// 卡通風：三階色調 + 黑色描邊（反向外殼法）
+let _grad = null;
+function gradient() {
+  if (!_grad) {
+    _grad = new THREE.DataTexture(new Uint8Array([110, 180, 255]), 3, 1, THREE.RedFormat);
+    _grad.minFilter = _grad.magFilter = THREE.NearestFilter;
+    _grad.needsUpdate = true;
+  }
+  return _grad;
+}
+const mat = (color) => new THREE.MeshToonMaterial({ color, gradientMap: gradient() });
+const outlineMat = new THREE.MeshBasicMaterial({ color: 0x120a28, side: THREE.BackSide });
+function outlineAll(root) {
+  const list = [];
+  root.traverse((o) => { if (o.isMesh && !o.userData.outline) list.push(o); });
+  for (const m of list) {
+    m.castShadow = true;
+    const o = new THREE.Mesh(m.geometry, outlineMat);
+    o.scale.setScalar(1.07);
+    o.userData.outline = true;
+    m.add(o);
+  }
+}
 
 /** 角色預設面向 +z。玩家會轉 180° 面向球網。 */
 export function buildCharacter(cfg = DEFAULT_CONFIG) {
@@ -137,6 +159,8 @@ export function buildCharacter(cfg = DEFAULT_CONFIG) {
   handle.position.y = -0.24;
   paddle.add(handle);
 
+  outlineAll(group);
+  outlineAll(paddle);
   return { group, body, head, shoulder, arm, paddle, cfg };
 }
 
@@ -147,4 +171,37 @@ export function stretchArm(arm, from, to) {
   arm.position.copy(from).addScaledVector(d, 0.5);
   arm.scale.set(1, len, 1);
   arm.quaternion.setFromUnitVectors(UP, d.normalize());
+}
+
+// 可調參數的範圍（編輯器滑桿與存檔驗證共用）：[最小, 最大, 步進, 顯示名稱]
+export const RANGES = {
+  headScale: [1.0, 2.2, 0.01, '頭大小'],
+  eyeSize: [0.04, 0.16, 0.005, '眼睛大小'],
+  eyeGap: [0.06, 0.24, 0.005, '眼距'],
+  eyeAsym: [0.5, 2.0, 0.01, '大小眼'],
+  mouthW: [0.06, 0.28, 0.005, '嘴巴寬度'],
+};
+
+export const COLOR_KEYS = {
+  skin: ['膚色', ['#ffd9b3', '#f1c27d', '#c68642', '#8d5524', '#b5e8a8', '#a8d8ff', '#e8a8ff', '#ffb3b3']],
+  shirt: ['上衣', ['#ff4f8b', '#4cc9f0', '#7bd389', '#ff9f1c', '#9b5de5', '#ffffff', '#222222', '#e63946']],
+  pants: ['褲子', ['#2b2d6e', '#222222', '#6b2b2b', '#0b5d4b', '#8d99ae', '#f4a261', '#7209b7', '#ffffff']],
+  hair: ['頭髮', ['#2a1a12', '#e0b050', '#cc3333', '#3a3aff', '#222222', '#ffffff', '#00c896', '#ff69b4']],
+  band: ['頭帶', ['#ffd23f', '#ffffff', '#00e5a0', '#ff4f8b', '#4cc9f0', '#222222', '#9b5de5', '#ff6b35']],
+  paddleColor: ['球拍', ['#d62828', '#2a9d8f', '#e76f51', '#264653', '#8338ec', '#ffd23f', '#222222', '#ff69b4']],
+};
+
+/** 把任意（可能被竄改或過期的）資料整理成合法的角色設定。 */
+export function sanitizeConfig(o) {
+  const out = { ...DEFAULT_CONFIG };
+  if (!o || typeof o !== 'object') return out;
+  for (const k of Object.keys(COLOR_KEYS)) {
+    if (typeof o[k] === 'string' && /^#[0-9a-fA-F]{6}$/.test(o[k])) out[k] = o[k];
+  }
+  for (const [k, [min, max]] of Object.entries(RANGES)) {
+    const v = Number(o[k]);
+    if (Number.isFinite(v)) out[k] = Math.min(max, Math.max(min, v));
+  }
+  out.mouthOpen = o.mouthOpen ? 1 : 0;
+  return out;
 }
