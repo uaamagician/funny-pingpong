@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { buildCharacter, randomConfig, stretchArm, DEFAULT_CONFIG } from './character.js';
-import { TABLE, BALL_R, NET_TOP, makeBall, stepBall, bounceOnTable, solveShot } from './physics.js';
+import { TABLE, BALL_R, NET_TOP, makeBall, stepBall, bounceOnTable } from './physics.js';
 import { sfx, unlockAudio } from './audio.js';
 import { createEditor } from './editor.js';
 import { loadConfig, saveConfig, loadPref, savePref } from './storage.js';
 import { ARENAS, DEFAULT_ARENA } from './arenas.js';
 import { TUNE } from './tuning.js';
-import { analyzeSwipe, handOf, timingInfo, buildPlayerShot, buildAiShot, pickAiKind, simulateShot } from './shots.js';
+import { analyzeSwipe, handOf, timingInfo, buildPlayerShot, buildAiShot, pickAiKind, finalizeShot, describeFlight, solveServe } from './shots.js';
 
 // ───────────────────────── 基本設定 ─────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -488,6 +488,7 @@ function updateActor(c, dt, time) {
 let state = 'menu'; // menu | editor | serve | rally | point | over
 let mode = 'match'; // match（對戰 AI）| drill（發球機練習）
 let streak = 0;
+let serveStage = 0;      // 發球規則：1 = 等第一次落在自己半桌，2 = 等落在對方半桌，0 = 一般對打
 let replay = null;       // 得分後的放大回放
 let replayBlend = 0;
 const replayFocus = new THREE.Vector3(0, 0.9, -0.5); // 回放鏡頭對準的位置（關鍵落點）
@@ -535,6 +536,8 @@ function currentServer() {
 }
 
 function startPoint() {
+  serveStage = 0;
+  replay = null; // 離開或重開時，若回放還在播就中止，否則球會被回放拉走
   server = mode === 'drill' ? 'ai' : currentServer();
   state = 'serve';
   bounce = { player: 0, ai: 0 };
@@ -602,18 +605,19 @@ function drillResult(winner, why) {
     sfx.point();
     pop(streak >= 3 ? `命中 ×${streak}！` : '命中！', '#7dff9a');
   } else if (winner === 'player') {
-    pop('發球失誤，重發', '#ffd23f'); // 發球機自己的失誤不算你的
+    pop('重發', '#ffd23f'); // 發球機自己的失誤不算你的
   } else {
     streak = 0;
     react('ai');
     sfx.lose();
-    pop(why || '沒接到…', '#ff7d7d');
+    pop(why || '失誤…', '#ff7d7d');
   }
   updateScoreUI();
 }
 
 // ───────────────────────── 擊球 ─────────────────────────
-function launch(shot, hitter) {
+function launch(shot, hitter, isServe = false) {
+  serveStage = isServe ? 1 : 0;
   ball.vel = { ...shot.vel };
   ball.spin = { ...shot.spin };
   lastHitter = hitter;
@@ -627,6 +631,12 @@ function launch(shot, hitter) {
   updateScoreUI();
 }
 
+function zoneText(p) {
+  const lr = p.x < -0.25 ? '左' : p.x > 0.25 ? '右' : '中';
+  const d = Math.abs(p.z);
+  return `${lr}・${d < 0.45 ? '網前' : d < 0.95 ? '中場' : '底線'}`;
+}
+
 // 擊球後在畫面上方顯示：球種、時機、球速、弧度、落點（方便「看」每一球的結果）
 let shotInfoTimer = 0;
 function showShotInfo(shot, sim, tInfo) {
@@ -638,8 +648,9 @@ function showShotInfo(shot, sim, tInfo) {
   const parts = [];
   if (tInfo) parts.push(`時機${tInfo.name}`);
   parts.push(`球速 ${Math.round(sim.speed * 3.6)} km/h`);
-  parts.push(`弧度 ${sim.curveCm} cm`);
-  parts.push(sim.landing ? `落點 ${sim.landing.zone}` : (sim.hitNet ? '會掛網！' : '會出界！'));
+  if (sim.curveCm != null) parts.push(`弧度 ${sim.curveCm} cm`);
+  // 失誤的球不會預告結果（不標落點、也不寫掛網／出界）
+  if (sim.landing) parts.push(`落點 ${sim.landing.zone}`);
   l2.textContent = parts.join(' · ');
   el.append(l1, l2);
   el.style.display = 'flex';
@@ -653,13 +664,14 @@ function playerServe(s) {
   if (!s.anyWin || s.contact > hitR()) { sfx.whoosh(); pop('要從球上滑過去！', '#ffd23f'); return; }
   const p0 = { ...ball.pos };
   const shot = buildPlayerShot({ swipe: s, p0, hand: 'FH', isServe: true });
-  const sol = solveShot(p0, shot.target, shot.T, shot.spin, shot.clearance);
-  launch({ vel: sol.vel, spin: shot.spin }, 'player');
+  // 發球：球先落在自己這半桌，彈起後過網，再落在對方半桌
+  const sv = solveServe(p0, shot.target, shot.spin, shot.fault);
+  launch({ vel: sv.vel, spin: shot.spin }, 'player', true);
   state = 'rally';
   swingActor(player, new THREE.Vector3(p0.x, p0.y, p0.z), clamp(s.dx / 120, -1, 1));
   sfx.hit();
   setHint('');
-  showShotInfo(shot, simulateShot(p0, shot), null);
+  showShotInfo(shot, { speed: Math.hypot(sv.vel.x, sv.vel.y, sv.vel.z), landing: sv.result === 'ok' && sv.landing ? { x: sv.landing.x, z: sv.landing.z, zone: zoneText(sv.landing) } : null }, null);
 }
 
 function playerSwipe(s) {
@@ -687,15 +699,15 @@ function playerSwipe(s) {
   const tInfo = timingInfo(s.contactZ ?? p0.z);           // 以「滑過球的那一刻」的位置判斷時機
   const acc = clamp(1 - s.contact / hitR(), 0, 1);        // 滑得準不準
   const shot = buildPlayerShot({ swipe: s, p0, hand, timingOff: tInfo.off, acc });
-  const sol = solveShot(p0, shot.target, shot.T, shot.spin, shot.clearance);
-  launch({ vel: sol.vel, spin: shot.spin }, 'player');
+  const fin = finalizeShot(p0, shot); // 這球若注定失誤，速度會被弄壞（掛網／太長／太偏／沒過網）
+  launch({ vel: fin.vel, spin: shot.spin }, 'player');
   lastShotWasSmash = shot.smash;
   swingActor(player, new THREE.Vector3(p0.x, p0.y, p0.z), dirX, 0.3, hand === 'BH');
   if (shot.smash) { sfx.smash(); shake = TUNE.smashShake; hitStop = 0.06; slowT = TUNE.smashSlow; fovKick = TUNE.smashFov; }
   else { sfx.hit(); if (shot.perfect) fovKick = -3; }
   if (Math.abs(shot.spin.side) >= 0.5) camRollTarget = -shot.spin.side * TUNE.camRoll;
   pop(shot.label, shot.smash ? '#ff6b3d' : shot.perfect ? '#7dff9a' : '#ffd23f');
-  showShotInfo(shot, simulateShot(p0, shot), tInfo);
+  showShotInfo(shot, describeFlight(p0, fin.vel, shot.spin), tInfo);
 }
 
 function aiServe() {
@@ -703,9 +715,9 @@ function aiServe() {
   const kind = ['drive', 'spin', 'loop', 'chop', 'drop'][Math.floor(Math.random() * 5)];
   const shot = buildAiShot(kind, 0.2);
   shot.target.z = clamp(shot.target.z, 0.4, 1.15); // 發球要落在你這邊的前半桌
-  const sol = solveShot(p0, shot.target, shot.T, shot.spin);
-  launch({ vel: sol.vel, spin: shot.spin }, 'ai');
-  setLanding(shot.target.x, shot.target.z);
+  const sv = solveServe(p0, shot.target, shot.spin, shot.fault);
+  launch({ vel: sv.vel, spin: shot.spin }, 'ai', true);
+  if (sv.result === 'ok') setLanding(shot.target.x, shot.target.z);
   state = 'rally';
   swingActor(ai, new THREE.Vector3(p0.x, p0.y, p0.z), 0);
   sfx.hit();
@@ -725,9 +737,10 @@ function aiReturn() {
   }
   const kind = pickAiKind({ hitY: p0.y, rally, aggressive: diff.aggr });
   const shot = buildAiShot(kind, diff.err);
-  const sol = solveShot(p0, shot.target, shot.T, shot.spin);
-  launch({ vel: sol.vel, spin: shot.spin }, 'ai');
-  setLanding(shot.target.x, shot.target.z);
+  const fin = finalizeShot(p0, shot);
+  launch({ vel: fin.vel, spin: shot.spin }, 'ai');
+  const aiFlight = describeFlight(p0, fin.vel, shot.spin);
+  if (aiFlight.landing) setLanding(aiFlight.landing.x, aiFlight.landing.z); // 會失誤的球不顯示落點標記
   lastShotWasSmash = kind === 'smash';
   swingActor(ai, new THREE.Vector3(p0.x, p0.y, p0.z), clamp(shot.target.x, -1, 1));
   if (lastShotWasSmash) { sfx.smash(); shake = 0.12; } else sfx.hit();
@@ -756,7 +769,7 @@ function stepRally(dt) {
       ball.vel.z *= -0.12;
       ball.vel.x *= 0.3;
       sfx.net();
-      award(other(lastHitter), lastHitter === 'player' ? '掛網…' : '對手掛網！');
+      award(other(lastHitter));
       return;
     }
   }
@@ -769,8 +782,18 @@ function stepRally(dt) {
     spawnRipple(ball.pos.x, ball.pos.z, 0xffffff, 0.8);
     recEvents.push({ t: clockT, x: ball.pos.x, z: ball.pos.z });
     const side = ball.pos.z > 0 ? 'player' : 'ai';
+    if (serveStage === 1) {
+      // 發球規則：第一次一定要落在自己半桌；直接飛到對方半桌算違例
+      if (side === lastHitter) { serveStage = 2; return; }
+      award(other(lastHitter));
+      return;
+    }
+    if (serveStage === 2) {
+      if (side === lastHitter) { award(other(lastHitter)); return; } // 在自己半桌彈了兩次
+      serveStage = 0;
+    }
     if (side === lastHitter) {
-      award(other(lastHitter), lastHitter === 'player' ? '先打到自己這邊…' : '對手失誤！');
+      award(other(lastHitter)); // 對打時先落在自己半桌 = 沒過網
       return;
     }
     bounce[side]++;
@@ -779,7 +802,7 @@ function stepRally(dt) {
       return;
     }
     if (bounce[side] >= 2) {
-      award(lastHitter, lastHitter === 'player' ? '漂亮！' : '對手得分');
+      award(lastHitter);
       return;
     }
   }
@@ -794,8 +817,8 @@ function stepRally(dt) {
   if ((ball.pos.y <= BALL_R + 0.005 && ball.vel.y < 0) || Math.abs(ball.pos.x) > 6 || Math.abs(ball.pos.z) > 7) {
     const recv = other(lastHitter);
     const good = bounce[recv] >= 1;
-    if (good) award(lastHitter, lastHitter === 'player' ? '得分！' : '對手得分');
-    else award(other(lastHitter), lastHitter === 'player' ? '出界…' : '對手出界！');
+    if (good) award(lastHitter);
+    else award(other(lastHitter)); // 沒落在對方半桌（出界）
   }
 }
 
@@ -918,6 +941,7 @@ function startGame(m) {
   startPoint();
 }
 function toMenu() {
+  replay = null;
   state = 'menu';
   ball.vel = { x: 0, y: 0, z: 0 };
   ball.pos = { x: 0, y: 1.05, z: PLAYER_Z - 0.35 };
@@ -1141,5 +1165,5 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // 提供除錯用的小接口（瀏覽器 console 可用 __game 檢視狀態）
-window.__game = { get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get streak() { return streak; }, get arena() { return currentArena; }, ballScreen, hitR, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
+window.__game = { get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get serveStage() { return serveStage; }, get streak() { return streak; }, get arena() { return currentArena; }, ballScreen, hitR, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
 void NET_TOP;
