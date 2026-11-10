@@ -16,9 +16,9 @@ const WIN_SCORE = 11;
 const PLAYER_Z = 3.0;
 const AI_Z = -2.6;
 const DIFFS = {
-  easy:   { miss: 0.28, err: 0.55, react: 0.7 },
-  normal: { miss: 0.14, err: 0.35, react: 0.85 },
-  hard:   { miss: 0.05, err: 0.18, react: 1.0 },
+  easy:   { miss: 0.28, err: 0.55, react: 0.7, hitR: 72 },
+  normal: { miss: 0.14, err: 0.35, react: 0.85, hitR: 58 },
+  hard:   { miss: 0.05, err: 0.18, react: 1.0, hitR: 46 },
 };
 let diff = DIFFS.normal;
 
@@ -151,6 +151,110 @@ for (const s of [-1, 1]) {
   const post = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, TABLE.netH + 0.04, 8), new THREE.MeshStandardMaterial({ color: 0x999999 }));
   post.position.set(s * (TABLE.halfW + 0.15), TABLE.top + TABLE.netH / 2, 0);
   scene.add(post);
+}
+
+// 落點標記（對手來球預告彈起位置）與落桌漣漪
+const landingMark = new THREE.Mesh(
+  new THREE.RingGeometry(0.07, 0.1, 28),
+  new THREE.MeshBasicMaterial({ color: 0xffe27a, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }),
+);
+landingMark.rotation.x = -Math.PI / 2;
+landingMark.visible = false;
+scene.add(landingMark);
+function setLanding(x, z) {
+  landingMark.position.set(x, TABLE.top + 0.006, z);
+  landingOn = true;
+}
+const rippleMat = () => new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+const ripples = Array.from({ length: 8 }, () => {
+  const m = new THREE.Mesh(new THREE.RingGeometry(0.06, 0.085, 28), rippleMat());
+  m.rotation.x = -Math.PI / 2;
+  m.visible = false;
+  scene.add(m);
+  return { m, life: 0, max: 1, big: 1 };
+});
+let rippleI = 0;
+function spawnRipple(x, z, color = 0xffffff, big = 1) {
+  const r = ripples[rippleI++ % ripples.length];
+  r.m.position.set(x, TABLE.top + 0.008, z);
+  r.m.material.color.set(color);
+  r.life = r.max = 0.7 + big * 0.3;
+  r.big = big;
+  r.m.visible = true;
+}
+function updateRipples(dt) {
+  for (const r of ripples) {
+    if (r.life <= 0) { r.m.visible = false; continue; }
+    r.life -= dt;
+    const k = 1 - Math.max(0, r.life) / r.max;
+    r.m.scale.setScalar(1 + k * 2.4 * r.big);
+    r.m.material.opacity = (1 - k) * 0.85;
+  }
+}
+
+// 擊球範圍圈：滑動路徑要經過球（圈內）才算打到
+const hitR = () => diff.hitR * clamp(Math.min(window.innerWidth, window.innerHeight * 0.56) / 375, 0.85, 1.5);
+const _bs = new THREE.Vector3();
+function ballScreen() {
+  _bs.copy(ballMesh.position).project(camera);
+  return { x: (_bs.x * 0.5 + 0.5) * window.innerWidth, y: (-_bs.y * 0.5 + 0.5) * window.innerHeight };
+}
+function canHitNow() {
+  return (state === 'serve' && server === 'player')
+    || (state === 'rally' && lastHitter === 'ai' && bounce.player >= 1 && ball.vel.z > 0
+      && ball.pos.z > 0.5 && ball.pos.z < 2.6 && ball.pos.y > 0.45);
+}
+function updateHitRing() {
+  const el = $('hitRing');
+  if (!canHitNow()) { el.style.display = 'none'; return; }
+  const p = ballScreen();
+  const R = hitR();
+  el.style.display = 'block';
+  el.style.width = el.style.height = `${R * 2}px`;
+  el.style.left = `${p.x}px`;
+  el.style.top = `${p.y}px`;
+  const tq = state === 'serve' ? 1 : clamp(1 - Math.abs(ball.pos.z - 1.4) / 1.1, 0, 1);
+  el.classList.toggle('gold', tq > 0.8);
+}
+
+// 得分回放：把最後一球的軌跡用慢動作放大重播
+function startReplay() {
+  if (mode !== 'match' || rec.length < 8) return 0;
+  const end = rec[rec.length - 1].t;
+  const from = Math.max(rec[0].t, end - 1.5);
+  const samples = rec.filter((r) => r.t >= from);
+  if (samples.length < 6) return 0;
+  const speed = 0.55;
+  const dur = (samples[samples.length - 1].t - samples[0].t) / speed;
+  const evs = recEvents.filter((e) => e.t >= from);
+  const fo = evs.length ? evs[evs.length - 1] : samples[samples.length - 1];
+  replayFocus.set(fo.x, TABLE.top + 0.2, fo.z);
+  replay = {
+    samples,
+    events: recEvents.filter((e) => e.t >= from).map((e) => ({ ...e, fired: false })),
+    t0: samples[0].t,
+    head: 0,
+    speed,
+    span: samples[samples.length - 1].t - samples[0].t,
+    hold: 0.7,
+  };
+  return dur + replay.hold;
+}
+function stepReplay(rawDt) {
+  const r = replay;
+  r.head += rawDt * r.speed;
+  const h = Math.min(r.head, r.span);
+  let i = 0;
+  while (i < r.samples.length - 2 && r.samples[i + 1].t - r.t0 < h) i++;
+  const a = r.samples[i], b = r.samples[Math.min(i + 1, r.samples.length - 1)];
+  const k = b.t > a.t ? clamp((h + r.t0 - a.t) / (b.t - a.t), 0, 1) : 0;
+  ball.pos.x = lerp(a.x, b.x, k); ball.pos.y = lerp(a.y, b.y, k); ball.pos.z = lerp(a.z, b.z, k);
+  ball.spin = { top: lerp(a.top, b.top, k), side: lerp(a.side, b.side, k) };
+  ball.vel = { x: (b.x - a.x) * 20, y: (b.y - a.y) * 20, z: (b.z - a.z) * 20 };
+  for (const e of r.events) {
+    if (!e.fired && e.t - r.t0 <= h) { e.fired = true; spawnRipple(e.x, e.z, 0xffd23f, 1.8); sfx.bounce(); }
+  }
+  if (r.head >= r.span + r.hold) replay = null;
 }
 
 let currentArena = DEFAULT_ARENA;
@@ -368,6 +472,13 @@ function updateActor(c, dt, time) {
 let state = 'menu'; // menu | editor | serve | rally | point | over
 let mode = 'match'; // match（對戰 AI）| drill（發球機練習）
 let streak = 0;
+let replay = null;       // 得分後的放大回放
+let replayBlend = 0;
+const replayFocus = new THREE.Vector3(0, 0.9, -0.5); // 回放鏡頭對準的位置（關鍵落點）
+let clockT = 0;
+let landingOn = false;
+const rec = [];          // 最後一球的飛行紀錄
+const recEvents = [];    // 落桌點
 let bestStreak = Number(loadPref('bestStreak', 0)) || 0;
 let score = { player: 0, ai: 0 };
 let server = 'player';
@@ -442,10 +553,12 @@ function award(winner, why) {
   const longRally = rally >= 6;
   score[winner]++;
   state = 'point';
-  pointTimer = 1.7;
+  rec.push({ t: clockT, x: ball.pos.x, y: ball.pos.y, z: ball.pos.z, top: ball.spin.top, side: ball.spin.side });
+  const rdur = startReplay();
+  pointTimer = rdur > 0 ? rdur + 0.5 : 1.7;
   rally = 0;
   react(winner);
-  if (longRally) { slowT = 0.7; fovKick = -8; }
+  if (longRally && !rdur) { slowT = 0.7; fovKick = -8; }
   if (winner === 'player') { sfx.point(); pop(why || '得分！', '#7dff9a'); }
   else { sfx.lose(); pop(why || '失分…', '#ff7d7d'); }
   updateScoreUI();
@@ -457,7 +570,7 @@ function award(winner, why) {
       $('overTitle').textContent = a > b ? '你贏了！' : '你輸了…';
       $('overScore').textContent = `${a} : ${b}`;
       showScreen('over');
-    }, 1400);
+    }, (rdur > 0 ? rdur + 0.9 : 1.4) * 1000);
   }
 }
 
@@ -492,6 +605,9 @@ function launch(shot, hitter) {
   rally++;
   aiTried = false;
   resetPath();
+  rec.length = 0;
+  recEvents.length = 0;
+  landingOn = false;
   updateScoreUI();
 }
 
@@ -554,6 +670,7 @@ function makeShot(s, p0, isServe, quality) {
 
 function playerServe(s) {
   if (-s.dy < 25) return;
+  if (!s.anyWin || s.contact > hitR()) { sfx.whoosh(); pop('要從球上滑過去！', '#ffd23f'); return; }
   const p0 = { ...ball.pos };
   const m = makeShot(s, p0, true, 1);
   const sol = solveShot(p0, m.target, m.T, m.spin);
@@ -573,7 +690,14 @@ function playerSwipe(s) {
   if (state === 'serve' && server === 'player') { playerServe(s); return; }
   if (state !== 'rally') return;
   const dirX = clamp(s.dx / 120, -1, 1);
-  if (!inHitWindow()) {
+  const reach = lastHitter === 'ai' && bounce.player >= 1 && ball.vel.z > 0 && ball.pos.z > 0.5 && ball.pos.z < 3.0 && ball.pos.y > 0.4;
+  if (s.anyWin && reach && s.contact > hitR()) {
+    sfx.whoosh();
+    swingActor(player, new THREE.Vector3(player.x + dirX * 0.3, 1.1, PLAYER_Z - 1.0), dirX);
+    pop('沒滑到球！', '#ffd23f');
+    return;
+  }
+  if (!(s.anyWin && reach)) {
     sfx.whoosh();
     swingActor(player, new THREE.Vector3(player.x + dirX * 0.3, 1.1, PLAYER_Z - 1.0), dirX);
     if (lastHitter === 'ai' && ball.vel.z > 0) {
@@ -583,7 +707,9 @@ function playerSwipe(s) {
     return;
   }
   const p0 = { ...ball.pos };
-  const quality = clamp(1 - Math.abs(p0.z - 1.4) / 1.1, 0, 1);
+  const timeQ = clamp(1 - Math.abs(p0.z - 1.4) / 1.1, 0, 1);
+  const acc = clamp(1 - s.contact / hitR(), 0, 1);
+  const quality = clamp(0.6 * timeQ + 0.4 * acc, 0, 1); // 時機 + 滑得準不準
   const m = makeShot(s, p0, false, quality);
   const sol = solveShot(p0, m.target, m.T, m.spin, m.smash ? 0.02 : 0.05);
   launch({ vel: sol.vel, spin: m.spin }, 'player');
@@ -601,6 +727,7 @@ function aiServe() {
   const spin = { top: rnd(0, 0.5), side: Math.random() < 0.55 ? rnd(0.5, 1) * (Math.random() < 0.5 ? -1 : 1) : 0 };
   const sol = solveShot(p0, target, rnd(0.75, 0.95), spin);
   launch({ vel: sol.vel, spin }, 'ai');
+  setLanding(target.x, target.z);
   state = 'rally';
   swingActor(ai, new THREE.Vector3(p0.x, p0.y, p0.z), 0);
   sfx.hit();
@@ -627,6 +754,7 @@ function aiReturn() {
   const T = r < 0.15 ? rnd(1.0, 1.15) : rnd(0.55, 0.9);
   const sol = solveShot(p0, target, T, spin);
   launch({ vel: sol.vel, spin }, 'ai');
+  setLanding(target.x, target.z);
   lastShotWasSmash = false;
   swingActor(ai, new THREE.Vector3(p0.x, p0.y, p0.z), clamp(target.x, -1, 1));
   sfx.hit();
@@ -661,6 +789,8 @@ function stepRally(dt) {
     && Math.abs(ball.pos.x) <= TABLE.halfW + BALL_R && Math.abs(ball.pos.z) <= TABLE.halfL + BALL_R) {
     bounceOnTable(ball);
     sfx.bounce();
+    spawnRipple(ball.pos.x, ball.pos.z, 0xffffff, 0.8);
+    recEvents.push({ t: clockT, x: ball.pos.x, z: ball.pos.z });
     const side = ball.pos.z > 0 ? 'player' : 'ai';
     if (side === lastHitter) {
       award(other(lastHitter), lastHitter === 'player' ? '先打到自己這邊…' : '對手失誤！');
@@ -702,6 +832,18 @@ function stepAfterPoint(dt) {
 // ───────────────────────── 輸入 ─────────────────────────
 let pts = null;
 const cv = renderer.domElement;
+// 每個取樣點記下「當下球在螢幕上的位置」，之後判斷滑動有沒有經過球
+function mkSample(e) {
+  const p = { x: e.clientX, y: e.clientY, t: performance.now(), ok: false, bx: 0, by: 0 };
+  if (canHitNow()) { const b = ballScreen(); p.ok = true; p.bx = b.x; p.by = b.y; }
+  return p;
+}
+function segDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const l2 = dx * dx + dy * dy;
+  const t = l2 ? clamp(((px - ax) * dx + (py - ay) * dy) / l2, 0, 1) : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
 // 手指軌跡特效：讓玩家看到自己「劃」出的線（弧線＝旋球）
 const fx = $('swipeFx');
 const fxCtx = fx.getContext('2d');
@@ -726,7 +868,8 @@ function fadeSwipe() {
 }
 cv.addEventListener('pointerdown', (e) => {
   unlockAudio();
-  pts = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
+  if (state === 'point' && replay) { replay = null; pointTimer = Math.min(pointTimer, 0.15); return; } // 點一下跳過回放
+  pts = [mkSample(e)];
   cv.setPointerCapture?.(e.pointerId);
   clearTimeout(fxTimer);
   fx.style.transition = 'none';
@@ -735,14 +878,26 @@ cv.addEventListener('pointerdown', (e) => {
 });
 cv.addEventListener('pointermove', (e) => {
   if (!pts) return;
-  pts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+  const sm = mkSample(e);
+  pts.push(sm);
   drawSwipe(pts);
+  if (sm.ok && Math.hypot(sm.x - sm.bx, sm.y - sm.by) <= hitR()) $('hitRing').classList.add('touch');
 });
 function endSwipe(e) {
   if (!pts) return;
-  pts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+  pts.push(mkSample(e));
   const s = analyzeSwipe(pts);
+  // 滑動路徑離球最近的距離（用每個取樣當下球的位置，路徑以線段計算）
+  s.anyWin = false;
+  s.contact = 1e9;
+  pts.forEach((p, i) => {
+    if (!p.ok) return;
+    s.anyWin = true;
+    const q = i > 0 ? pts[i - 1] : p;
+    s.contact = Math.min(s.contact, segDist(p.bx, p.by, q.x, q.y, p.x, p.y));
+  });
   pts = null;
+  $('hitRing').classList.remove('touch');
   fadeSwipe();
   if (s.len < 28) return; // 只認「滑動」，輕點不算
   if (state === 'menu' || state === 'over' || state === 'editor') return;
@@ -891,13 +1046,21 @@ function frame(now) {
   timeScale = lerp(timeScale, slowT > 0 ? 0.3 : 1, 1 - Math.exp(-14 * rawDt));
   const dt = hitStop > 0 ? 0 : rawDt * timeScale;
   time += dt;
+  clockT += dt;
 
   const sub = 4;
   for (let i = 0; i < sub; i++) {
     const h = dt / sub;
     if (state === 'rally') stepRally(h);
-    else if (state === 'point' || state === 'over') stepAfterPoint(h);
+    else if ((state === 'point' || state === 'over') && !replay) stepAfterPoint(h);
   }
+  if (state === 'rally') rec.push({ t: clockT, x: ball.pos.x, y: ball.pos.y, z: ball.pos.z, top: ball.spin.top, side: ball.spin.side });
+  if (rec.length > 600) rec.splice(0, rec.length - 600);
+  if (replay) stepReplay(rawDt);
+  updateRipples(rawDt);
+  landingMark.visible = landingOn && state === 'rally' && lastHitter === 'ai' && bounce.player === 0;
+  if (landingMark.visible) landingMark.scale.setScalar(1 + Math.sin(time * 10) * 0.12);
+  $('replayTag').style.display = replay ? 'block' : 'none';
   if (state === 'serve') {
     if (server === 'player') ball.pos.x = player.x;
     else { ball.pos.x = ai.x; serveTimer -= dt; if (serveTimer <= 0) aiServe(); }
@@ -944,9 +1107,10 @@ function frame(now) {
     ballMesh.rotateOnWorldAxis(_axisY, -ball.spin.side * 40 * dt);
   }
   if (state === 'rally') growPath();
-  else if (state === 'point') pathMesh.material.opacity = Math.max(0, pathMesh.material.opacity - dt * 0.9);
+  else if (state === 'point' && !replay) pathMesh.material.opacity = Math.max(0, pathMesh.material.opacity - dt * 0.9);
   else pathMesh.count = 0;
   updateSpinTag();
+  updateHitRing();
 
   // 鏡頭導演：來球時壓低靠近、殺球震動與變焦、旋球傾斜、得分時推近
   shake = Math.max(0, shake - rawDt);
@@ -961,21 +1125,34 @@ function frame(now) {
   } else {
     const incoming = state === 'rally' && lastHitter === 'ai' && ball.vel.z > 0;
     camApproach = lerp(camApproach, incoming ? clamp(ball.pos.z / 2.6, 0, 1) : 0, 1 - Math.exp(-6 * rawDt));
-    pointDolly = lerp(pointDolly, state === 'point' || state === 'over' ? 1 : 0, 1 - Math.exp(-3 * rawDt));
+    pointDolly = lerp(pointDolly, (state === 'point' || state === 'over') && !replay ? 1 : 0, 1 - Math.exp(-3 * rawDt));
     const sx = (Math.random() - 0.5) * shake * 0.14, sy = (Math.random() - 0.5) * shake * 0.14;
-    camera.position.set(
+    const camPos = new THREE.Vector3(
       CAM_BASE.x + clamp(ball.pos.x, -1.6, 1.6) * 0.32 + sx,
       lerp(CAM_BASE.y, 2.9, camApproach) - 0.7 * pointDolly + sy,
       lerp(CAM_BASE.z, 4.8, camApproach) - 1.4 * pointDolly,
     );
     const ly = 0.4 + clamp(ball.pos.y - 0.8, 0, 1) * 0.25;
-    camera.lookAt(
+    const look = new THREE.Vector3(
       lerp(ball.pos.x * 0.3, ball.pos.x * 0.7, pointDolly),
       lerp(ly, ball.pos.y * 0.6, pointDolly),
       lerp(-0.3 + camApproach * 0.8, ball.pos.z * 0.5, pointDolly),
     );
-    camera.rotateZ(camRoll);
-    camera.fov = baseFov + fovKick - 4 * camApproach - 5 * pointDolly;
+    let fov = baseFov + fovKick - 4 * camApproach - 5 * pointDolly;
+    // 回放：鏡頭放大貼近球並緩慢環繞
+    replayBlend = lerp(replayBlend, replay ? 1 : 0, 1 - Math.exp(-4.5 * rawDt));
+    const e = replayBlend * replayBlend * (3 - 2 * replayBlend);
+    if (e > 0.001) {
+      const ang = 0.55 + Math.sin(clockT * 0.9) * 0.35;
+      const close = new THREE.Vector3(replayFocus.x + Math.sin(ang) * 2.2, 2.6, replayFocus.z + Math.cos(ang) * 3.9);
+      camPos.lerp(close, e);
+      look.lerp(new THREE.Vector3(lerp(replayFocus.x, ball.pos.x, 0.45), lerp(replayFocus.y, ball.pos.y, 0.5), lerp(replayFocus.z, ball.pos.z, 0.45)), e);
+      fov = lerp(fov, 50, e);
+    }
+    camera.position.copy(camPos);
+    camera.lookAt(look);
+    camera.rotateZ(camRoll * (1 - e));
+    camera.fov = fov;
   }
   camera.updateProjectionMatrix();
 
@@ -985,5 +1162,5 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // 提供除錯用的小接口（瀏覽器 console 可用 __game 檢視狀態）
-window.__game = { get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get streak() { return streak; }, get arena() { return currentArena; }, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
+window.__game = { get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get streak() { return streak; }, get arena() { return currentArena; }, ballScreen, hitR, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
 void NET_TOP;
