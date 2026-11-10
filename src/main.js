@@ -39,7 +39,11 @@ scene.background = new THREE.Color(0x1b1033);
 scene.fog = new THREE.Fog(0x1b1033, 9, 22);
 
 const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 60);
-const CAM_BASE = new THREE.Vector3(0, 4.5, 6.8); // 比較高、比較遠，從上往下看，玩家的大頭不會擋住球桌
+// 視角距離：近／中／遠（玩家可在比賽畫面右上角切換，會記住）
+const CAM_LEVELS = { near: { y: 3.5, z: 5.3, label: '近' }, mid: { y: 3.9, z: 5.9, label: '中' }, far: { y: 4.5, z: 6.8, label: '遠' } };
+const CAM_ORDER = ['near', 'mid', 'far'];
+let camLevel = CAM_LEVELS[loadPref('cam', 'mid')] ? loadPref('cam', 'mid') : 'mid';
+const CAM_BASE = new THREE.Vector3(0, CAM_LEVELS[camLevel].y, CAM_LEVELS[camLevel].z);
 let baseFov = 66;
 // 鏡頭導演：慢動作、頓幀、視角衝擊、傾斜、靠近來球
 let timeScale = 1, slowT = 0, hitStop = 0, fovKick = 0, camRoll = 0, camRollTarget = 0, camApproach = 0, pointDolly = 0;
@@ -950,9 +954,17 @@ const profile = getProfile();
 function showScreen(id) { // id 為 null 時全部隱藏
   for (const x of ['menu', 'practice', 'over']) $(x).classList.toggle('hidden', x !== id);
 }
+$('camBtn').textContent = `視角：${CAM_LEVELS[camLevel].label}`;
+$('camBtn').addEventListener('click', () => {
+  camLevel = CAM_ORDER[(CAM_ORDER.indexOf(camLevel) + 1) % CAM_ORDER.length];
+  CAM_BASE.set(0, CAM_LEVELS[camLevel].y, CAM_LEVELS[camLevel].z);
+  $('camBtn').textContent = `視角：${CAM_LEVELS[camLevel].label}`;
+  savePref('cam', camLevel);
+});
 function setHud(on) {
   $('hud').classList.toggle('hidden', !on);
   $('quitBtn').classList.toggle('hidden', !on);
+  $('camBtn').classList.toggle('hidden', !on);
   document.querySelector('.score.match').classList.toggle('hidden', mode !== 'match');
   $('drillHud').classList.toggle('hidden', mode !== 'drill');
 }
@@ -1171,8 +1183,8 @@ function frame(now) {
     const sx = (Math.random() - 0.5) * shake * 0.14, sy = (Math.random() - 0.5) * shake * 0.14;
     const camPos = new THREE.Vector3(
       CAM_BASE.x + clamp(ball.pos.x, -1.6, 1.6) * 0.32 + sx,
-      lerp(CAM_BASE.y, 3.6, camApproach) - 0.7 * TUNE.pointDolly * pointDolly + sy,
-      lerp(CAM_BASE.z, 5.8, camApproach) - 1.4 * TUNE.pointDolly * pointDolly,
+      CAM_BASE.y - 0.8 * camApproach - 0.7 * TUNE.pointDolly * pointDolly + sy,
+      CAM_BASE.z - 1.0 * camApproach - 1.4 * TUNE.pointDolly * pointDolly,
     );
     const ly = 0.4 + clamp(ball.pos.y - 0.8, 0, 1) * 0.25;
     const look = new THREE.Vector3(

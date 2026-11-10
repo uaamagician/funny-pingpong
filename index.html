@@ -74,6 +74,8 @@
     .score.hidden { display:none; }
     .quit { position:absolute; left:12px; top:calc(env(safe-area-inset-top) + 14px); width:40px; height:40px; border-radius:50%; border:2px solid rgba(255,255,255,.3); background:rgba(20,10,45,.7); color:#fff; font-size:18px; z-index:3; }
     .quit.hidden { display:none; }
+    .camtoggle { position:absolute; right:12px; top:calc(env(safe-area-inset-top) + 14px); height:40px; padding:0 14px; border-radius:20px; border:2px solid rgba(255,255,255,.3); background:rgba(20,10,45,.7); color:#fff; font-size:14px; font-weight:700; z-index:3; }
+    .camtoggle.hidden { display:none; }
     h2 { margin:0; font-size:34px; font-weight:900; text-shadow:0 4px 0 var(--pink); }
     .card { appearance:none; width:min(320px,100%); text-align:left; border:3px solid rgba(255,255,255,.25); background:linear-gradient(135deg, rgba(255,79,139,.35), rgba(76,201,240,.25)); color:#fff; border-radius:18px; padding:14px 16px; display:flex; flex-direction:column; gap:4px; }
     .card b { font-size:20px; }
@@ -103,6 +105,7 @@
       </div>
     </div>
     <button class="quit hidden" id="quitBtn" aria-label="離開">✕</button>
+    <button class="camtoggle hidden" id="camBtn" aria-label="切換視角距離">視角：中</button>
     <div class="rally" id="rally"></div>
     <canvas class="swipefx" id="swipeFx"></canvas>
     <div class="timering" id="timeRing"></div>
