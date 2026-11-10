@@ -24,7 +24,7 @@ function tone(freq, dur, type = 'square', vol = 0.08, slide = 0) {
 }
 
 export const sfx = {
-  hit: () => tone(620, 0.08, 'triangle', 0.14, -260),
+  hit: (m = 1) => tone(620 * m, 0.08, 'triangle', 0.14, -260 * m), // m > 1：連續完美時音調越來越高
   smash: () => { tone(180, 0.18, 'sawtooth', 0.14, -90); tone(900, 0.1, 'square', 0.08, -500); },
   bounce: () => tone(240, 0.05, 'sine', 0.12, -60),
   net: () => tone(110, 0.14, 'square', 0.1, -40),
