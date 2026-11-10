@@ -93,7 +93,7 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
   if (isServe) kind = 'serve';
   else if (fwd < -15) kind = 'chop';
   else if (p < 0.2) kind = 'drop';
-  else if (p > 0.78) kind = FH ? (p0.y > 0.95 ? 'smash' : 'loop') : 'flick';
+  else if (p > 0.7) kind = FH ? (p0.y > 0.9 ? 'smash' : 'loop') : 'flick'; // 殺球更容易觸發
   else if (Math.abs(s.curve) > 0.07) kind = 'spin';
   else if (p > 0.42) kind = 'loop';
   else kind = 'drive';
@@ -127,7 +127,7 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
     case 'spin': T = 0.7; tz = -(0.75 + 0.3 * p); break;
     case 'chop': T = 0.92; tz = -(0.55 + 0.35 * rand()); break;
     case 'drop': T = 0.95; tz = -(0.35 + 0.2 * rand()); break;
-    case 'smash': T = 0.34; tz = -1.2; break;
+    case 'smash': T = 0.3; tz = -1.25; break;      // 更快、更深
     case 'flick': T = 0.46; tz = -1.0; break;
     case 'lift': T = 0.88; tz = -1.0; break;
     default: // serve
@@ -167,7 +167,7 @@ const AI_KINDS = {
   spin: { name: '旋球', T: [0.66, 0.76], z: [0.7, 1.15], spin: (r) => ({ top: 0.25, side: (0.35 + 0.35 * r()) * (r() < 0.5 ? -1 : 1) }) },
   chop: { name: '切球', T: [0.88, 0.98], z: [0.45, 0.8], spin: () => ({ top: -0.6, side: 0 }) },
   drop: { name: '吊球', T: [0.92, 1.0], z: [0.3, 0.5], spin: () => ({ top: -0.35, side: 0 }) },
-  smash: { name: '殺球', T: [0.34, 0.4], z: [0.8, 1.2], spin: () => ({ top: 0.15, side: 0 }) },
+  smash: { name: '殺球', T: [0.3, 0.36], z: [0.8, 1.2], spin: () => ({ top: 0.15, side: 0 }) },
   lob: { name: '高吊', T: [1.1, 1.2], z: [1.0, 1.3], spin: () => ({ top: 0.3, side: 0 }) },
 };
 
