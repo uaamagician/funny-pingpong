@@ -1,6 +1,6 @@
 // 擊球模型：把「滑動 + 球的位置 + 時機」轉成一記球。純函式、不依賴畫面，
 // 所以可以在 Node 裡做實驗（npm run lab），也能在遊戲裡直接用。
-import { TABLE, BALL_R, NET_TOP, makeBall, stepBall, bounceOnTable, solveShot } from './physics.js';
+import { TABLE, BALL_R, NET_TOP, stepBall, bounceOnTable, solveShot } from './physics.js';
 import { TUNE } from './tuning.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -38,13 +38,40 @@ export function timingInfo(z) {
   return { off, q: clamp(1 - a / 0.9, 0, 1), name };
 }
 
+// ───────────────────────── 失誤（沒進）模型 ─────────────────────────
+// 每一球都有機率失誤：球種越冒險、時機/準度越差，機率越高。
+// 失誤不會寫在畫面上，而是真的讓球「掛網／出界／沒過網」，再由比賽規則判定。
+const FAULT_BASE = { drive: 0.05, loop: 0.1, spin: 0.11, chop: 0.06, drop: 0.13, smash: 0.2, flick: 0.15, lift: 0.04, serve: 0.05, lob: 0.05 };
+const FAULT_MIX = {
+  smash: { net: 0.35, long: 0.45, wide: 0.2 },
+  flick: { net: 0.4, long: 0.4, wide: 0.2 },
+  loop: { long: 0.5, net: 0.3, wide: 0.2 },
+  spin: { wide: 0.5, net: 0.3, long: 0.2 },
+  drop: { net: 0.5, short: 0.5 },
+  chop: { net: 0.6, short: 0.4 },
+  drive: { net: 0.4, long: 0.3, short: 0.3 },
+  lift: { long: 0.6, wide: 0.4 },
+  lob: { long: 0.6, wide: 0.4 },
+  serve: { net: 0.4, long: 0.3, short: 0.3 },
+};
+export function faultChance(kind, quality = 1, mul = 1) {
+  return clamp((FAULT_BASE[kind] ?? 0.04) * (1 + 2 * (1 - quality)) * mul, 0, 0.55);
+}
+export function rollFault(kind, quality = 1, mul = 1, rand = Math.random) {
+  if (rand() >= faultChance(kind, quality, mul)) return null;
+  const mix = FAULT_MIX[kind] || FAULT_MIX.drive;
+  let r = rand() * Object.values(mix).reduce((a, b) => a + b, 0);
+  for (const [k, w] of Object.entries(mix)) { r -= w; if (r <= 0) return k; }
+  return 'net';
+}
+
 /**
  * 玩家的滑動 → 一記球。
  * - 一律帶旋轉：向前滑=上旋，向下滑=下旋，劃弧線=側旋；越快旋轉越強。
  * - 正手：力量大、旋轉強、能殺球；反手：較穩、力量小、改用快撥。
  * - 時機偏早 → 球偏左、變短；偏晚 → 球偏右、變深（容易出界）。
  */
-export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, acc = 1, isServe = false, rand = Math.random }) {
+export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, acc = 1, isServe = false, riskMul = 1, rand = Math.random }) {
   const FH = hand === 'FH';
   const fwd = -s.dy;
   const tq = clamp(1 - Math.abs(timingOff) / 0.9, 0, 1);
@@ -117,6 +144,7 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, acc 
   const label = isServe ? '發球' : `${perfect ? '完美·' : ''}${name}`;
   return {
     kind, hand, label, smash: kind === 'smash', perfect, quality, tq,
+    fault: rollFault(kind, quality, riskMul, rand),
     target: { x: tx, y: TABLE.top + BALL_R, z: tz },
     T, spin: { top, side },
     // 時機太差時過網高度不足 → 可能掛網
@@ -149,36 +177,33 @@ export function pickAiKind({ hitY = 0.9, rally = 0, aggressive = 0.5, rand = Mat
 }
 
 export function buildAiShot(kind, err = 0.3, rand = Math.random) {
+  const fault = rollFault(kind, 1, err / 0.35, rand); // 簡單的 AI 比較容易失誤
   const d = AI_KINDS[kind] || AI_KINDS.drive;
   const range = ([a, b]) => a + (b - a) * rand();
   return {
-    kind, label: d.name,
+    kind, label: d.name, fault,
     target: { x: clamp((rand() - 0.5) * 1.2 + (rand() - 0.5) * err, -0.72, 0.72), y: TABLE.top + BALL_R, z: range(d.z) },
     T: range(d.T), spin: d.spin(rand),
   };
 }
 
-// ───────────────────────── 試打模擬 ─────────────────────────
-function zoneOf(x, z, towardNegZ) {
+// ───────────────────────── 飛行模擬 ─────────────────────────
+function zoneOf(x, z) {
   const lr = x < -0.25 ? '左' : x > 0.25 ? '右' : '中';
   const depth = Math.abs(z); // 離網距離
   const dn = depth < 0.45 ? '網前' : depth < 0.95 ? '中場' : '底線';
-  return { lr, dn, text: `${lr}・${dn}`, towardNegZ };
+  return { lr, dn, text: `${lr}・${dn}` };
 }
 
-/** 實際把這一記球飛一遍：落點、弧度（側偏）、最高點、過網高度、彈起後偏移。 */
-export function simulateShot(p0, shot) {
-  const sol = solveShot(p0, shot.target, shot.T, shot.spin, shot.clearance ?? (shot.smash ? 0.02 : 0.05));
-  const b = makeBall();
-  b.pos = { ...p0 };
-  b.vel = { ...sol.vel };
-  b.spin = { ...shot.spin };
-  const dirZ = Math.sign(sol.vel.z) || -1;
-  const speed0 = Math.hypot(sol.vel.x, sol.vel.y, sol.vel.z);
+/** 把一記球完整飛一遍（含球網、落桌、彈起），回傳事件與軌跡。 */
+export function flight(p0, vel, spin, maxT = 3) {
+  const b = { pos: { ...p0 }, vel: { ...vel }, spin: { ...spin } };
+  const bounces = [];
   const path = [{ ...b.pos }];
-  let netClear = null, hitNet = false, crossed = false, landing = null, peakY = b.pos.y, post = null;
+  let crossed = false, netHit = false, netClear = null, peakY = b.pos.y;
   const dt = 1 / 240;
-  for (let i = 0; i < 240 * 3; i++) {
+  let t = 0;
+  for (; t < maxT; t += dt) {
     const pz = b.pos.z;
     stepBall(b, dt);
     path.push({ ...b.pos });
@@ -186,37 +211,110 @@ export function simulateShot(p0, shot) {
     if (!crossed && (pz > 0) !== (b.pos.z > 0)) {
       crossed = true;
       netClear = b.pos.y - NET_TOP;
-      if (b.pos.y < NET_TOP + BALL_R * 0.3 && Math.abs(b.pos.x) < TABLE.halfW + 0.15) { hitNet = true; break; }
+      if (b.pos.y < NET_TOP + BALL_R * 0.3 && Math.abs(b.pos.x) < TABLE.halfW + 0.15) { netHit = true; break; }
     }
-    if (!landing && crossed && b.vel.y < 0 && b.pos.y <= TABLE.top + BALL_R
+    if (b.vel.y < 0 && b.pos.y <= TABLE.top + BALL_R && b.pos.y > TABLE.top - 0.12
       && Math.abs(b.pos.x) <= TABLE.halfW + BALL_R && Math.abs(b.pos.z) <= TABLE.halfL + BALL_R) {
       const vxBefore = b.vel.x;
-      landing = { x: b.pos.x, z: b.pos.z, t: i * dt };
+      const hit = { x: b.pos.x, z: b.pos.z, t, side: b.pos.z > 0 ? 1 : -1, vxBefore };
       bounceOnTable(b);
-      post = { x0: b.pos.x, vxBefore, vxAfter: b.vel.x };
-      // 彈起後再飛 0.35 秒，看側向又偏了多少
-      const bb = { pos: { ...b.pos }, vel: { ...b.vel }, spin: { ...b.spin } };
-      for (let k = 0; k < 84; k++) stepBall(bb, dt);
-      post.shift = bb.pos.x - post.x0 - vxBefore * 0.35;
-      break;
+      hit.vxAfter = b.vel.x;
+      bounces.push(hit);
+      if (bounces.length >= 3) break;
     }
     if (b.pos.y < BALL_R) break;
   }
-  // 側向弧度：路徑相對「起點→落點」直線的最大偏離
+  return { bounces, crossed, netHit, netClear, peakY, path, end: { ...b.pos }, t };
+}
+
+/** 先解出理想速度，若這球注定失誤，再把速度弄壞一點（掛網／太長／太偏／力量不足）。 */
+export function finalizeShot(p0, shot, rand = Math.random) {
+  const sol = solveShot(p0, shot.target, shot.T, shot.spin, shot.clearance ?? (shot.smash ? 0.02 : 0.05));
+  const vel = { ...sol.vel };
+  switch (shot.fault) {
+    case 'net': vel.y -= 1.4 + 0.6 * rand(); break;                        // 過網高度不夠
+    case 'long': vel.z *= 1.3 + 0.12 * rand(); vel.y += 0.3; break;         // 太長，飛出桌尾
+    case 'wide': vel.x += (rand() < 0.5 ? -1 : 1) * (1.6 + 0.7 * rand()); break; // 太偏，飛出側邊
+    case 'short': vel.z *= 0.42 + 0.12 * rand(); break;                    // 力量不足，沒過網
+    default: break;
+  }
+  return { vel, T: sol.T };
+}
+
+/** 落點結果：ok／net／out／short */
+export function classify(f, ownSign) {
+  if (f.netHit) return 'net';
+  const first = f.bounces[0];
+  if (first) return first.side === ownSign ? 'short' : 'ok';
+  return f.crossed ? 'out' : 'short';
+}
+
+/** 實際把這一記球飛一遍：結果、落點、弧度（側偏）、最高點、過網高度、彈起後偏移。 */
+export function simulateShot(p0, shot, rand = Math.random) {
+  const { vel } = finalizeShot(p0, shot, rand);
+  const ownSign = Math.sign(p0.z) || 1;
+  const f = flight(p0, vel, shot.spin);
+  const result = classify(f, ownSign);
+  const land = result === 'ok' ? f.bounces[0] : null;
+  const end = land || f.path[f.path.length - 1];
   let maxDev = 0;
-  const end = landing || path[path.length - 1];
   const dz = end.z - p0.z;
   if (Math.abs(dz) > 0.05) {
-    for (const q of path) {
-      const s = clamp((q.z - p0.z) / dz, 0, 1);
-      maxDev = Math.max(maxDev, Math.abs(q.x - (p0.x + s * (end.x - p0.x))));
+    for (const q of f.path) {
+      const sFrac = clamp((q.z - p0.z) / dz, 0, 1);
+      maxDev = Math.max(maxDev, Math.abs(q.x - (p0.x + sFrac * (end.x - p0.x))));
     }
   }
-  const onTable = !!landing;
   return {
-    onTable, hitNet, speed: speed0, flightT: landing ? landing.t : null, peakY,
-    netClear, curveCm: Math.round(maxDev * 100), bounceShiftCm: post ? Math.round(post.shift * 100) : 0,
-    landing: landing ? { x: landing.x, z: landing.z, zone: zoneOf(landing.x, landing.z, dirZ < 0).text } : null,
-    vel: sol.vel,
+    result, onTable: result === 'ok', hitNet: result === 'net',
+    speed: Math.hypot(vel.x, vel.y, vel.z), peakY: f.peakY, netClear: f.netClear,
+    curveCm: Math.round(maxDev * 100),
+    bounceShiftCm: land ? Math.round((land.vxAfter - land.vxBefore) * 35) : 0,
+    landing: land ? { x: land.x, z: land.z, zone: zoneOf(land.x, land.z).text } : null,
+    vel,
   };
+}
+
+// ───────────────────────── 發球：先打自己這半桌，再過網 ─────────────────────────
+/**
+ * 解出發球的初速度：球先落在自己半桌（第一次落點 B），彈起後過網，落在對方半桌 L 附近。
+ * 用掃描 + 模擬找最接近的組合；若這球注定失誤（fault），改挑一個會失誤的組合。
+ * 回傳 { vel, own: 第一次落點, result: ok/net/out/short/illegal }
+ */
+export function solveServe(p0, L, spin, fault = null, rand = Math.random) {
+  const sgn = Math.sign(p0.z) || 1;
+  const cands = [];
+  for (const T1 of [0.28, 0.34, 0.4, 0.48]) {
+    for (let bz = 0.2; bz <= 1.3; bz += 0.05) {
+      const B = { x: p0.x + (L.x - p0.x) * 0.35, y: TABLE.top + BALL_R, z: sgn * bz };
+      const sol = solveShot(p0, B, T1, spin, -1);
+      const f = flight(p0, sol.vel, spin, 2.5);
+      const first = f.bounces[0], second = f.bounces[1];
+      let result;
+      if (f.netHit) result = 'net';
+      else if (!first || first.side !== sgn) result = 'illegal';          // 沒先打到自己半桌
+      else if (!second) result = f.crossed ? 'out' : 'short';
+      else result = second.side === sgn ? 'short' : 'ok';
+      const lz = second ? second.z : f.end.z, lx = second ? second.x : f.end.x;
+      cands.push({ vel: sol.vel, own: first || null, result, err: Math.abs(lz - L.z) + 0.6 * Math.abs(lx - L.x), lz, lx });
+    }
+  }
+  const pool = (r) => cands.filter((c) => c.result === r).sort((a, b) => a.err - b.err);
+  const good = pool('ok');
+  const want = fault && fault !== 'wide' ? fault : null;
+  if (want) {
+    // 想要的失誤方式：net／long(out)／short
+    const list = pool(want === 'long' ? 'out' : want);
+    if (list.length) return { vel: list[0].vel, own: list[0].own, result: list[0].result };
+  }
+  if (good.length) {
+    const best = good[0];
+    if (fault === 'wide') { // 太偏：同一組速度，橫向多給一點
+      const vel = { ...best.vel, x: best.vel.x + (rand() < 0.5 ? -1 : 1) * 1.4 };
+      return { vel, own: best.own, result: 'out' };
+    }
+    return { vel: best.vel, own: best.own, result: 'ok', landing: { x: best.lx, z: best.lz } };
+  }
+  const any = cands.sort((a, b) => a.err - b.err)[0];
+  return { vel: any.vel, own: any.own, result: any.result };
 }
