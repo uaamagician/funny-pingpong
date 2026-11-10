@@ -130,27 +130,33 @@ function aiTable() {
 function serveTable() {
   console.log('\n══ 發球實驗：先落自己半桌再過網（擊球點偏差 σ=0.4，各 400 次）══');
   const rows = [];
-  for (const [who, z0, sgn] of [['玩家發球', 2.65, -1], ['AI 發球', -2.65, 1]]) {
+  const cfgs = [
+    ['玩家上旋發球(向上滑)', 2.65, -1, () => ({ dx: (Math.random() - 0.5) * 80, dy: -150, len: 150, dur: 150 + Math.random() * 100, curve: (Math.random() - 0.5) * 0.1 })],
+    ['玩家下旋發球(向下滑)', 2.65, -1, () => ({ dx: (Math.random() - 0.5) * 60, dy: 90 + Math.random() * 80, len: 130, dur: 150 + Math.random() * 150, curve: (Math.random() - 0.5) * 0.1 })],
+    ['玩家側旋發球(弧線)', 2.65, -1, () => ({ dx: 10, dy: -150, len: 150, dur: 200, curve: (Math.random() < 0.5 ? -1 : 1) * (0.12 + Math.random() * 0.15) })],
+    ['AI 發球', -2.65, 1, null],
+  ];
+  for (const [who, z0, sgn, mk] of cfgs) {
     const c = { ok: 0, net: 0, out: 0, short: 0, illegal: 0 };
-    let minOwn = 9, maxOwn = 0, errSum = 0, errN = 0;
+    let minOwn = 9, maxOwn = 0, errSum = 0, errN = 0, top = 0;
     for (let i = 0; i < 400; i++) {
       const p0 = { x: (Math.random() - 0.5) * 0.6, y: 1.05, z: z0 };
-      const s = { dx: (Math.random() - 0.5) * 80, dy: -150, len: 150, dur: 150 + Math.random() * 100, curve: (Math.random() - 0.5) * 0.1 };
-      s.speed = s.len / s.dur;
-      let target;
-      if (sgn < 0) {
+      let target, spin;
+      if (mk) {
+        const s = mk(); s.speed = s.len / s.dur;
         const shot = buildPlayerShot({ swipe: s, p0, isServe: true, contact: { ox: gauss() * 0.4, oy: gauss() * 0.4 } });
-        target = shot.target; var spin = shot.spin;
+        target = shot.target; spin = shot.spin;
       } else {
         const shot = buildAiShot(['drive', 'spin', 'loop', 'chop', 'drop'][i % 5], { sigO: 0.4, sigT: 0.3 });
         target = { ...shot.target, z: Math.max(0.4, Math.min(1.15, shot.target.z)) }; spin = shot.spin;
       }
+      top += spin.top;
       const r = solveServe(p0, target, spin);
       c[r.result]++;
       if (r.own) { minOwn = Math.min(minOwn, Math.abs(r.own.z)); maxOwn = Math.max(maxOwn, Math.abs(r.own.z)); }
       if (r.result === 'ok' && r.landing) { errSum += Math.hypot(r.landing.x - target.x, r.landing.z - target.z); errN++; }
     }
-    rows.push({ 發球方: who, 合法進: pct(c.ok, 400), 掛網: pct(c.net, 400), 出界: pct(c.out, 400), 沒過: pct(c.short, 400), 沒先落己方: pct(c.illegal, 400),
+    rows.push({ 發球方: who, 平均上下旋: (top / 400).toFixed(2), 合法進: pct(c.ok, 400), 掛網: pct(c.net, 400), 出界: pct(c.out, 400), 沒過: pct(c.short, 400), 沒先落己方: pct(c.illegal, 400),
       '自己半桌落點z': `${minOwn.toFixed(2)}~${maxOwn.toFixed(2)}`, '平均落點誤差cm': errN ? Math.round((errSum / errN) * 100) : '-' });
   }
   console.table(rows);

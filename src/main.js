@@ -552,7 +552,7 @@ function startPoint() {
   if (server === 'player') {
     ball.pos = { x: player.x, y: 1.05, z: PLAYER_Z - 0.35 };
     lastHitter = 'player';
-    setHint('向上滑動發球（往左或往右滑決定方向）');
+    setHint('從球上滑過去發球：往上滑＝一般，往下滑＝下旋，劃弧線＝側旋');
   } else {
     ball.pos = { x: ai.x, y: 1.05, z: AI_Z + 0.35 };
     lastHitter = 'ai';
@@ -671,7 +671,7 @@ function showShotInfo(shot, sim, tInfo, contact) {
 }
 
 function playerServe(s) {
-  if (-s.dy < 25) return;
+  if (Math.abs(s.dy) < 25) return; // 往上滑＝一般發球，往下滑＝下旋發球
   if (!s.anyWin || s.contact > hitR()) { sfx.whoosh(); pop('要從球上滑過去！', '#ffd23f'); return; }
   const p0 = { ...ball.pos };
   const shot = buildPlayerShot({ swipe: s, p0, hand: 'FH', isServe: true, contact: { ox: s.contactOx ?? 0, oy: s.contactOy ?? 0 } });

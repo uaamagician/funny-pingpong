@@ -45,9 +45,11 @@ export function timingInfo(z) {
 //     球碰在這一劃的起手段（還沒加速）→ 力量不足、球壓得太低（掛網）；
 //     碰在收尾段（揮過頭）→ 球飛太遠（出界）。最準是在一劃的中段碰到球。
 // 球種越冒險（殺球、快撥、吊球），同樣的偏差會被放大得越多。
-export const SWEET = 0.4;                  // 甜蜜點半徑（占擊球圈半徑的比例），在內不會有偏差
+export const SWEET = 0.55;                  // 甜蜜點半徑（占擊球圈半徑的比例），在內不會有偏差
 const KIND_RISK = { smash: 1.5, flick: 1.25, spin: 1.15, loop: 1.1, drop: 1.2, drive: 0.85, chop: 0.85, lift: 0.7, lob: 0.8, serve: 0.9 };
 const dead = (v) => Math.sign(v) * Math.max(0, Math.abs(v) - SWEET) / (1 - SWEET);
+// 時機寬容區：|偏差| 在這之內完全不扣分
+const LATE_EARLY_FREE = 0.3;
 
 /**
  * 把「碰到球的位置」和「時機」換成落點偏差。
@@ -57,11 +59,11 @@ const dead = (v) => Math.sign(v) * Math.max(0, Math.abs(v) - SWEET) / (1 - SWEET
 export function contactErrors({ ox = 0, oy = 0, timingOff = 0, kind = 'drive', errMul = 1 }) {
   const m = (KIND_RISK[kind] ?? 1) * errMul;
   const oxe = dead(ox), oye = dead(oy);
-  const late = Math.max(0, timingOff - 0.25), early = Math.max(0, -timingOff - 0.25);
-  const dx = m * 0.6 * oxe + 0.2 * clamp(timingOff / 0.8, -1, 1);
-  const dDepth = m * (0.65 * Math.max(0, oye) - 0.45 * Math.max(0, -oye) + 0.9 * late - 0.7 * early)
-    + (timingOff >= 0 ? 0.3 : 0.25) * timingOff;
-  const dClear = m * (0.18 * Math.max(0, -oye) + 0.3 * early); // 球被壓低的程度
+  const late = Math.max(0, timingOff - LATE_EARLY_FREE), early = Math.max(0, -timingOff - LATE_EARLY_FREE);
+  const dx = m * 0.5 * oxe + 0.15 * clamp(timingOff / 0.8, -1, 1);
+  const dDepth = m * (0.5 * Math.max(0, oye) - 0.35 * Math.max(0, -oye) + 0.7 * late - 0.55 * early)
+    + (timingOff >= 0 ? 0.25 : 0.2) * timingOff;
+  const dClear = m * (0.14 * Math.max(0, -oye) + 0.24 * early); // 球被壓低的程度
   return { dx, dDepth, dClear, sloppy: Math.max(Math.abs(oxe), Math.abs(oye)) };
 }
 
@@ -109,7 +111,7 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
     case 'loop': top = (0.35 + 0.4 * p) * (FH ? 1 : 0.8); break;
     case 'spin': top = 0.25; break;
     case 'lift': top = 0.3; break;
-    case 'serve': top = 0.15 + 0.3 * p; break;
+    case 'serve': top = fwd < 0 ? -(0.4 + 0.35 * clamp(-fwd / 140, 0, 1)) : 0.15 + 0.3 * p; break; // 往下滑 = 下旋發球
     default: top = 0.18 + 0.12 * p;
   }
   top *= spinMul;
@@ -128,7 +130,9 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
     case 'smash': T = 0.34; tz = -1.2; break;
     case 'flick': T = 0.46; tz = -1.0; break;
     case 'lift': T = 0.88; tz = -1.0; break;
-    default: T = 0.82 - 0.3 * p; tz = -(0.5 + 0.6 * p); // serve
+    default: // serve
+      if (fwd < 0) { T = 0.9; tz = -(0.45 + 0.25 * p); }  // 下旋發球：慢、短
+      else { T = 0.82 - 0.3 * p; tz = -(0.5 + 0.6 * p); }
   }
   // 往前滑：看滑動方向；往下切：看左右偏多少（直直往下就是打中間）
   let tx = fwd > 0 ? clamp(Math.atan2(s.dx, fwd) / 0.9, -1, 1) * 0.58 : clamp(s.dx / 150, -1, 1) * 0.5;
@@ -143,7 +147,8 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
 
   const name = kind === 'spin' ? (side > 0 ? '右旋球' : '左旋球') : KIND_NAME[kind];
   // 正手／反手只影響手感，不顯示在畫面上
-  const label = isServe ? '發球' : `${perfect ? '完美·' : ''}${name}`;
+  const serveName = top < -0.25 ? '下旋發球' : Math.abs(side) > 0.3 ? (side > 0 ? '右旋發球' : '左旋發球') : '發球';
+  const label = isServe ? serveName : `${perfect ? '完美·' : ''}${name}`;
   return {
     kind, hand, label, smash: kind === 'smash', perfect, quality, tq,
     off,
