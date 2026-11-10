@@ -3,7 +3,8 @@ import { buildCharacter, randomConfig, stretchArm, DEFAULT_CONFIG } from './char
 import { TABLE, BALL_R, NET_TOP, makeBall, stepBall, bounceOnTable, solveShot } from './physics.js';
 import { sfx, unlockAudio } from './audio.js';
 import { createEditor } from './editor.js';
-import { loadConfig, saveConfig } from './storage.js';
+import { loadConfig, saveConfig, loadPref, savePref } from './storage.js';
+import { ARENAS, DEFAULT_ARENA } from './arenas.js';
 
 // ───────────────────────── 基本設定 ─────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -38,7 +39,8 @@ const CAM_BASE = new THREE.Vector3(0, 3.5, 5.6);
 camera.position.copy(CAM_BASE);
 camera.lookAt(0, 0.4, -0.3);
 
-scene.add(new THREE.HemisphereLight(0xcfd8ff, 0x2a1450, 1.1));
+const hemi = new THREE.HemisphereLight(0xcfd8ff, 0x2a1450, 1.1);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(3, 6, 4);
 sun.castShadow = true;
@@ -67,6 +69,7 @@ court.rotation.x = -Math.PI / 2;
 court.position.y = 0.004;
 court.receiveShadow = true;
 scene.add(court);
+const beams = [];
 for (const [x, c] of [[-2.6, 0xff4f8b], [2.6, 0x4cc9f0], [-1.1, 0xffd23f], [1.1, 0x9b5de5]]) {
   const beam = new THREE.Mesh(
     new THREE.ConeGeometry(1.1, 7, 24, 1, true),
@@ -75,6 +78,7 @@ for (const [x, c] of [[-2.6, 0xff4f8b], [2.6, 0x4cc9f0], [-1.1, 0xffd23f], [1.1,
   beam.position.set(x, 3.5, -3.5);
   beam.rotation.z = x * -0.05;
   scene.add(beam);
+  beams.push(beam);
 }
 const ring = new THREE.Mesh(
   new THREE.RingGeometry(5.2, 5.4, 64),
@@ -83,6 +87,7 @@ const ring = new THREE.Mesh(
 ring.rotation.x = -Math.PI / 2;
 ring.position.y = 0.01;
 scene.add(ring);
+const pillars = [];
 for (let i = 0; i < 9; i++) {
   const a = (i / 9) * Math.PI - Math.PI; // 背景一排發光方塊
   const h = rnd(2, 5);
@@ -93,7 +98,17 @@ for (let i = 0; i < 9; i++) {
   box.position.set(Math.cos(a) * 9, h / 2, Math.sin(a) * 9 - 1);
   box.lookAt(0, h / 2, 0);
   scene.add(box);
+  pillars.push(box);
 }
+// 太空場地用的星星
+const stars = new THREE.Points(
+  new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(
+    Array.from({ length: 600 }, (_, i) => (i % 3 === 1 ? rnd(1, 14) : rnd(-18, 18))), 3)),
+  new THREE.PointsMaterial({ color: 0xffffff, size: 0.09, fog: false }),
+);
+stars.position.z = -10;
+stars.visible = false;
+scene.add(stars);
 
 // 球桌
 const tableMat = new THREE.MeshStandardMaterial({ color: 0x1f5fb8, roughness: 0.5 });
@@ -134,6 +149,31 @@ for (const s of [-1, 1]) {
   post.position.set(s * (TABLE.halfW + 0.15), TABLE.top + TABLE.netH / 2, 0);
   scene.add(post);
 }
+
+let currentArena = DEFAULT_ARENA;
+function applyArena(id) {
+  const a = ARENAS[id] || ARENAS[DEFAULT_ARENA];
+  currentArena = ARENAS[id] ? id : DEFAULT_ARENA;
+  scene.background.set(a.bg);
+  scene.fog.color.set(a.bg);
+  scene.fog.near = a.fog[0];
+  scene.fog.far = a.fog[1];
+  hemi.color.set(a.hemi[0]);
+  hemi.groundColor.set(a.hemi[1]);
+  sun.color.set(a.sun);
+  rim.color.set(a.rim);
+  floor.material.color.set(a.floor);
+  court.material.color.set(a.court);
+  tableMat.color.set(a.table);
+  ring.material.color.set(a.ring);
+  beams.forEach((b, i) => b.material.color.set(a.beams[i % a.beams.length]));
+  pillars.forEach((p, i) => {
+    p.material.color.set(a.pillar);
+    p.material.emissive.setHSL(a.hue[0] + (a.hue[1] - a.hue[0]) * (i / (pillars.length - 1)), a.sat, a.light);
+  });
+  stars.visible = a.stars;
+}
+applyArena(loadPref('arena', DEFAULT_ARENA));
 
 // 球、影子、殘影
 const ball = makeBall();
@@ -237,6 +277,9 @@ function updateActor(c, dt, time) {
 
 // ───────────────────────── 比賽狀態 ─────────────────────────
 let state = 'menu'; // menu | editor | serve | rally | point | over
+let mode = 'match'; // match（對戰 AI）| drill（發球機練習）
+let streak = 0;
+let bestStreak = Number(loadPref('bestStreak', 0)) || 0;
 let score = { player: 0, ai: 0 };
 let server = 'player';
 let firstServer = 'player';
@@ -264,7 +307,9 @@ function updateScoreUI() {
   $('sA').textContent = score.ai;
   $('dotP').classList.toggle('on', server === 'player');
   $('dotA').classList.toggle('on', server === 'ai');
-  $('rally').textContent = rally > 1 ? `連續對打 ${rally}` : '';
+  $('rally').textContent = mode === 'match' && rally > 1 ? `連續對打 ${rally}` : '';
+  $('sStreak').textContent = streak;
+  $('sBest').textContent = bestStreak;
 }
 
 function currentServer() {
@@ -274,7 +319,7 @@ function currentServer() {
 }
 
 function startPoint() {
-  server = currentServer();
+  server = mode === 'drill' ? 'ai' : currentServer();
   state = 'serve';
   bounce = { player: 0, ai: 0 };
   rally = 0;
@@ -297,6 +342,7 @@ function startPoint() {
 
 function award(winner, why) {
   if (state === 'point' || state === 'over') return;
+  if (mode === 'drill') { drillResult(winner, why); return; }
   score[winner]++;
   state = 'point';
   pointTimer = 1.5;
@@ -308,11 +354,32 @@ function award(winner, why) {
   if ((a >= WIN_SCORE || b >= WIN_SCORE) && Math.abs(a - b) >= 2) {
     state = 'over';
     setTimeout(() => {
+      if (state !== 'over') return;
       $('overTitle').textContent = a > b ? '你贏了！' : '你輸了…';
       $('overScore').textContent = `${a} : ${b}`;
-      $('over').classList.remove('hidden');
+      showScreen('over');
     }, 1400);
   }
+}
+
+// 練習模式：只統計「連續命中」，不計分、不結束
+function drillResult(winner, why) {
+  state = 'point';
+  pointTimer = 1.1;
+  rally = 0;
+  if (winner === 'player' && lastHitter === 'player') {
+    streak++;
+    if (streak > bestStreak) { bestStreak = streak; savePref('bestStreak', bestStreak); }
+    sfx.point();
+    pop(streak >= 3 ? `命中 ×${streak}！` : '命中！', '#7dff9a');
+  } else if (winner === 'player') {
+    pop('發球失誤，重發', '#ffd23f'); // 發球機自己的失誤不算你的
+  } else {
+    streak = 0;
+    sfx.lose();
+    pop(why || '沒接到…', '#ff7d7d');
+  }
+  updateScoreUI();
 }
 
 // ───────────────────────── 擊球 ─────────────────────────
@@ -485,6 +552,10 @@ function stepRally(dt) {
       return;
     }
     bounce[side]++;
+    if (mode === 'drill' && side === 'ai' && lastHitter === 'player') {
+      award('player');
+      return;
+    }
     if (bounce[side] >= 2) {
       award(lastHitter, lastHitter === 'player' ? '漂亮！' : '對手得分');
       return;
@@ -492,7 +563,7 @@ function stepRally(dt) {
   }
 
   // 對手回擊
-  if (lastHitter === 'player' && bounce.ai >= 1 && ball.vel.z < 0 && ball.pos.z <= -1.2 && !aiTried && ball.pos.y > 0.4) {
+  if (mode === 'match' && lastHitter === 'player' && bounce.ai >= 1 && ball.vel.z < 0 && ball.pos.z <= -1.2 && !aiTried && ball.pos.y > 0.4) {
     aiTried = true;
     aiReturn();
   }
@@ -541,23 +612,90 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ───────────────────────── 選單 ─────────────────────────
+function showScreen(id) { // id 為 null 時全部隱藏
+  for (const x of ['menu', 'practice', 'over']) $(x).classList.toggle('hidden', x !== id);
+}
+function setHud(on) {
+  $('hud').classList.toggle('hidden', !on);
+  $('quitBtn').classList.toggle('hidden', !on);
+  document.querySelector('.score.match').classList.toggle('hidden', mode !== 'match');
+  $('drillHud').classList.toggle('hidden', mode !== 'drill');
+}
+
+const savedDiff = DIFFS[loadPref('diff', 'normal')] ? loadPref('diff', 'normal') : 'normal';
+diff = DIFFS[savedDiff];
 document.querySelectorAll('#diff button').forEach((b) => {
+  b.classList.toggle('on', b.dataset.d === savedDiff);
   b.addEventListener('click', () => {
     document.querySelectorAll('#diff button').forEach((x) => x.classList.remove('on'));
     b.classList.add('on');
     diff = DIFFS[b.dataset.d];
+    savePref('diff', b.dataset.d);
   });
 });
-function newMatch() {
+
+function startGame(m) {
   unlockAudio();
+  mode = m;
   score = { player: 0, ai: 0 };
+  streak = 0;
   firstServer = Math.random() < 0.5 ? 'player' : 'ai';
-  Object.assign(ai.cfg, {}); // 之後可在這裡換對手造型
-  $('menu').classList.add('hidden');
-  $('over').classList.add('hidden');
+  showScreen(null);
+  setHud(true);
   startPoint();
 }
-$('startBtn').addEventListener('click', newMatch);
+function toMenu() {
+  state = 'menu';
+  ball.vel = { x: 0, y: 0, z: 0 };
+  ball.pos = { x: 0, y: 1.05, z: PLAYER_Z - 0.35 };
+  setHint('');
+  $('pop').classList.remove('show');
+  setHud(false);
+  showScreen('menu');
+}
+$('practiceBtn').addEventListener('click', () => { unlockAudio(); showScreen('practice'); });
+$('practiceBack').addEventListener('click', () => showScreen('menu'));
+$('matchBtn').addEventListener('click', () => startGame('match'));
+$('drillBtn').addEventListener('click', () => startGame('drill'));
+$('againBtn').addEventListener('click', () => startGame(mode));
+$('quitBtn').addEventListener('click', toMenu);
+
+// 場地選擇：底部面板，上方仍看得到球桌與場景
+const arenaBox = $('arenaSheet');
+function renderArenas() {
+  const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  arenaBox.replaceChildren();
+  const sheet = mk('div', 'sheet');
+  sheet.append(mk('h3', null, '選擇場地'));
+  for (const [id, a] of Object.entries(ARENAS)) {
+    const b = mk('button', 'arena' + (id === currentArena ? ' on' : ''));
+    b.type = 'button';
+    const sw = mk('span', 'sw4');
+    a.swatch.forEach((c) => { const i = mk('i'); i.style.background = c; sw.append(i); });
+    const t = mk('span', 'at');
+    t.append(mk('b', null, a.name), mk('small', null, a.desc));
+    b.append(sw, t);
+    b.addEventListener('click', () => {
+      applyArena(id);
+      savePref('arena', id);
+      $('arenaName').textContent = a.name;
+      renderArenas();
+    });
+    sheet.append(b);
+  }
+  const bar = mk('div', 'bar');
+  const done = mk('button', 'btn small', '完成');
+  done.addEventListener('click', () => { arenaBox.classList.add('hidden'); showScreen('menu'); });
+  bar.append(done);
+  sheet.append(bar);
+  arenaBox.append(sheet);
+}
+$('arenaName').textContent = ARENAS[currentArena].name;
+$('arenaBtn').addEventListener('click', () => {
+  showScreen(null);
+  renderArenas();
+  arenaBox.classList.remove('hidden');
+});
 
 // 角色編輯：鏡頭轉到玩家正面，下半部顯示編輯面板
 const editor = createEditor($('editor'), {
@@ -571,15 +709,14 @@ const editor = createEditor($('editor'), {
     player.group.rotation.y = Math.PI;
     setHeadGhost(player, true);
     ballMesh.visible = shadow.visible = true;
-    $('menu').classList.remove('hidden');
-    $('hud').classList.remove('hidden');
+    showScreen('menu');
   },
 });
 $('editBtn').addEventListener('click', () => {
   unlockAudio();
   state = 'editor';
-  $('menu').classList.add('hidden');
-  $('hud').classList.add('hidden');
+  showScreen(null);
+  setHud(false);
   setHint('');
   player.x = 0;
   player.group.rotation.y = 0;
@@ -588,8 +725,6 @@ $('editBtn').addEventListener('click', () => {
   trail.forEach((t) => { t.material.opacity = 0; });
   editor.open();
 });
-$('againBtn').addEventListener('click', newMatch);
-
 // ───────────────────────── 主迴圈 ─────────────────────────
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -673,5 +808,5 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // 提供除錯用的小接口（瀏覽器 console 可用 __game 檢視狀態）
-window.__game = { get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, ball, score: () => ({ ...score }), player, ai, startPoint, newMatch };
+window.__game = { get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get streak() { return streak; }, get arena() { return currentArena; }, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
 void NET_TOP;

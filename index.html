@@ -52,18 +52,38 @@
     .btn.small { flex:1; font-size:16px; padding:10px 0; border-radius:14px; box-shadow:0 4px 0 #8a5a00; }
     .btn.small.alt { box-shadow:0 4px 0 #8a1040; }
     .btn.gray { background:linear-gradient(#b9b3c9,#8f88a3); color:#fff; border-color:#2a2540; box-shadow:0 4px 0 #4a4560; }
+    .score.hidden { display:none; }
+    .quit { position:absolute; left:12px; top:calc(env(safe-area-inset-top) + 14px); width:40px; height:40px; border-radius:50%; border:2px solid rgba(255,255,255,.3); background:rgba(20,10,45,.7); color:#fff; font-size:18px; z-index:3; }
+    .quit.hidden { display:none; }
+    h2 { margin:0; font-size:34px; font-weight:900; text-shadow:0 4px 0 var(--pink); }
+    .card { appearance:none; width:min(320px,100%); text-align:left; border:3px solid rgba(255,255,255,.25); background:linear-gradient(135deg, rgba(255,79,139,.35), rgba(76,201,240,.25)); color:#fff; border-radius:18px; padding:14px 16px; display:flex; flex-direction:column; gap:4px; }
+    .card b { font-size:20px; }
+    .card span { font-size:13px; opacity:.85; }
+    .card:active { transform:scale(.98); }
+    .arena { appearance:none; width:100%; display:flex; align-items:center; gap:12px; text-align:left; margin:8px 0; padding:10px 12px; border-radius:14px; border:3px solid rgba(255,255,255,.18); background:rgba(255,255,255,.06); color:#fff; }
+    .arena.on { border-color:var(--gold); background:rgba(255,210,63,.12); }
+    .arena .sw4 { display:grid; grid-template-columns:1fr 1fr; width:48px; height:48px; border-radius:10px; overflow:hidden; flex:none; }
+    .arena .sw4 i { display:block; }
+    .arena .at { display:flex; flex-direction:column; gap:2px; }
+    .arena small { opacity:.75; font-size:12px; }
     .help { font-size:13px; opacity:.8; line-height:1.7; max-width:320px; text-align:left; background:rgba(0,0,0,.25); padding:10px 14px; border-radius:12px; }
   </style>
 </head>
 <body>
   <div id="app">
     <div class="hud" id="hud">
-      <div class="score">
+      <div class="score match">
         <div><small>你<span class="serve-dot" id="dotP"></span></small><b id="sP">0</b></div>
         <span class="sep">:</span>
         <div><small>對手<span class="serve-dot" id="dotA"></span></small><b id="sA">0</b></div>
       </div>
+      <div class="score drill hidden" id="drillHud">
+        <div><small>連續命中</small><b id="sStreak">0</b></div>
+        <span class="sep">|</span>
+        <div><small>最佳</small><b id="sBest">0</b></div>
+      </div>
     </div>
+    <button class="quit hidden" id="quitBtn" aria-label="離開">✕</button>
     <div class="rally" id="rally"></div>
     <div class="pop" id="pop"></div>
     <div class="hint" id="hint"></div>
@@ -71,21 +91,32 @@
     <div class="overlay" id="menu">
       <h1>乒乓<br/>大亂鬥</h1>
       <div class="sub">手指一揮，殺球、旋球、吊球</div>
+      <button class="btn" id="practiceBtn">AI 對練</button>
+      <button class="btn alt" id="editBtn">改造型</button>
+      <button class="btn gray" id="arenaBtn">場地：<span id="arenaName"></span></button>
+    </div>
+
+    <div class="overlay hidden" id="practice">
+      <h2>AI 對練</h2>
+      <div class="sub">難度</div>
       <div class="diff" id="diff">
         <button data-d="easy">簡單</button>
         <button data-d="normal" class="on">普通</button>
         <button data-d="hard">困難</button>
       </div>
-      <button class="btn" id="startBtn">開始比賽</button>
-      <button class="btn alt" id="editBtn">改造型</button>
+      <button class="card" id="matchBtn"><b>對戰 AI</b><span>11 分制、輪流發球，完整比賽</span></button>
+      <button class="card" id="drillBtn"><b>發球機練習</b><span>無限發球、不計分，專心練手感與旋球</span></button>
       <div class="help">
         <b>發球：</b>向上滑動（左右決定方向）<br/>
         <b>接球：</b>球彈起來後往前滑動擊球<br/>
         <b>殺球：</b>球在高處時快速猛滑<br/>
         <b>旋球：</b>滑動時劃出弧線（左弧／右弧）<br/>
-        <b>吊球：</b>輕輕短滑 <b>切球：</b>向下滑
+        <b>吊球：</b>輕輕短滑　<b>切球：</b>向下滑
       </div>
+      <button class="btn gray" id="practiceBack">返回</button>
     </div>
+
+    <div class="editor hidden" id="arenaSheet"></div>
 
     <div class="editor hidden" id="editor"></div>
 
