@@ -1,4 +1,4 @@
-import { RANGES, COLOR_KEYS, DEFAULT_CONFIG, randomConfig, sanitizeConfig } from './character.js';
+import { RANGES, COLOR_KEYS, DEFAULT_CONFIG, HATS, GLASSES, SHIRTS, randomConfig, sanitizeConfig } from './character.js';
 
 /**
  * 角色編輯面板。cfg 變動時呼叫 onChange(cfg)；按「完成」呼叫 onClose(cfg)。
@@ -37,6 +37,28 @@ export function createEditor(root, { getConfig, onChange, onClose }) {
     mouth.append(chk);
     face.append(mouth);
     sheet.append(face);
+
+    // 配件：帽子、眼鏡、上衣花紋（點選項即時套用）
+    const acc = el('div', 'sec');
+    acc.append(el('h3', null, '配件'));
+    for (const [key, label, list] of [['hat', '帽子', HATS], ['glasses', '眼鏡', GLASSES], ['shirtStyle', '上衣', SHIRTS]]) {
+      const row = el('div', 'row chips');
+      row.append(el('span', null, label));
+      const wrap = el('div', 'chipwrap');
+      for (const [val, name] of list) {
+        const b = el('button', 'chip' + (cfg[key] === val ? ' on' : ''), name);
+        b.type = 'button';
+        b.addEventListener('click', () => {
+          cfg[key] = val;
+          onChange(cfg);
+          wrap.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === b));
+        });
+        wrap.append(b);
+      }
+      row.append(wrap);
+      acc.append(row);
+    }
+    sheet.append(acc);
 
     const colors = el('div', 'sec');
     colors.append(el('h3', null, '服飾與顏色'));
