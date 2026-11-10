@@ -9,7 +9,8 @@
     "preview": "vite preview --host",
     "lab": "node scripts/shot-lab.mjs",
     "lab:compare": "node scripts/shot-lab.mjs compare",
-    "lab:tune": "node scripts/tune-lab.mjs"
+    "lab:tune": "node scripts/tune-lab.mjs",
+    "lab:char": "node scripts/char-lab.mjs"
   },
   "dependencies": {
     "three": "^0.187.0"
