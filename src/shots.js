@@ -45,6 +45,8 @@ export function timingInfo(z) {
 //     球碰在這一劃的起手段（還沒加速）→ 力量不足、球壓得太低（掛網）；
 //     碰在收尾段（揮過頭）→ 球飛太遠（出界）。最準是在一劃的中段碰到球。
 // 球種越冒險（殺球、快撥、吊球），同樣的偏差會被放大得越多。
+const AIM_SCALE = 0.72;       // 滑動角度 → 落點左右的比例（斜到約 55° 以上就會出界）
+const BALL_SIDE_PULL = 0.24;  // 球在邊上時，落點再往同一側多偏一點
 export const SWEET = 0.55;                  // 甜蜜點半徑（占擊球圈半徑的比例），在內不會有偏差
 const KIND_RISK = { smash: 1.5, flick: 1.25, spin: 1.15, loop: 1.1, drop: 1.2, drive: 0.85, chop: 0.85, lift: 0.7, lob: 0.8, serve: 0.9 };
 const dead = (v) => Math.sign(v) * Math.max(0, Math.abs(v) - SWEET) / (1 - SWEET);
@@ -140,7 +142,10 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
       else { T = 0.85 - 0.2 * p; tz = -(0.5 + 0.35 * p); }
   }
   // 往前滑：看滑動方向；往下切：看左右偏多少（直直往下就是打中間）
-  let tx = fwd > 0 ? clamp(Math.atan2(s.dx, fwd) / 0.9, -1, 1) * 0.58 : clamp(s.dx / 150, -1, 1) * 0.5;
+  // 往前滑：看滑動角度（很斜的話會超過桌邊 = 出界）；往下切：看左右偏多少。
+  // 球在身體左／右側時，往同一側斜打會更容易出界（球本來就在邊上，再往外就沒桌子了）。
+  const aim = fwd > 0 ? clamp(Math.atan2(s.dx, fwd) / 0.9, -1.2, 1.2) * AIM_SCALE : clamp(s.dx / 150, -1, 1) * 0.55;
+  let tx = aim + (isServe ? 0 : BALL_SIDE_PULL * clamp(p0.x, -1, 1));
 
   // 套用時機與擊球點造成的偏差（發球只受擊球點影響）
   const e = contactErrors({ ox: contact.ox, oy: contact.oy, timingOff: isServe ? 0 : timingOff, kind, errMul: errMul * (FH ? 1 : 0.85) * (mods.err ?? 1), free: mods.free ?? LATE_EARLY_FREE });
