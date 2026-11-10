@@ -36,6 +36,9 @@ scene.fog = new THREE.Fog(0x1b1033, 9, 22);
 
 const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 60);
 const CAM_BASE = new THREE.Vector3(0, 3.5, 5.6);
+let baseFov = 66;
+// 鏡頭導演：慢動作、頓幀、視角衝擊、傾斜、靠近來球
+let timeScale = 1, slowT = 0, hitStop = 0, fovKick = 0, camRoll = 0, camRollTarget = 0, camApproach = 0, pointDolly = 0;
 camera.position.copy(CAM_BASE);
 camera.lookAt(0, 0.4, -0.3);
 
@@ -220,7 +223,7 @@ function spinInfo(sp) {
 // 飛行軌跡：沿著球走過的路留下一串發光小點，旋球的弧線一目了然
 const PATH_MAX = 220;
 const pathMesh = new THREE.InstancedMesh(
-  new THREE.SphereGeometry(0.016, 6, 5),
+  new THREE.SphereGeometry(0.011, 6, 5),
   new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false }),
   PATH_MAX,
 );
@@ -236,12 +239,12 @@ function resetPath() {
   pathLast.set(ball.pos.x, ball.pos.y, ball.pos.z);
   const info = spinInfo(ball.spin);
   pathMesh.material.color.set(info ? info.css : '#ffffff');
-  pathMesh.material.opacity = 0.9;
+  pathMesh.material.opacity = 0.7;
 }
 function growPath() {
   const cur = new THREE.Vector3(ball.pos.x, ball.pos.y, ball.pos.z);
   const d = cur.distanceTo(pathLast);
-  const steps = Math.min(8, Math.floor(d / 0.05));
+  const steps = Math.min(8, Math.floor(d / 0.065));
   for (let i = 1; i <= steps && pathN < PATH_MAX; i++) {
     const q = pathLast.clone().lerp(cur, i / steps);
     _m4.makeTranslation(q.x, q.y, q.z);
@@ -275,6 +278,8 @@ function makeActor(cfg, isPlayer) {
   c.isPlayer = isPlayer;
   c.x = 0;
   c.swing = null;
+  c.react = 0;
+  c.reactKind = 'win';
   c.baseZ = isPlayer ? PLAYER_Z : AI_Z;
   return c;
 }
@@ -322,6 +327,19 @@ function updateActor(c, dt, time) {
   g.position.x = c.x;
   c.body.position.y = Math.abs(Math.sin(time * 5 + (c.isPlayer ? 0 : 1))) * 0.035;
   c.head.rotation.z = Math.sin(time * 3 + (c.isPlayer ? 0 : 2)) * 0.07;
+  // 得分／失分的搞笑反應：贏的人跳起來，輸的人頭膨脹搖晃
+  if (c.react > 0) {
+    c.react -= dt;
+    const k = Math.max(0, c.react), f = Math.min(1, k * 2);
+    if (c.reactKind === 'win') {
+      c.body.position.y += Math.abs(Math.sin(k * 13)) * 0.32 * f;
+      c.head.rotation.z += Math.sin(k * 28) * 0.2 * f;
+    } else {
+      c.head.rotation.z += Math.sin(k * 24) * 0.35 * f;
+      const sq = 1 + Math.sin(k * 10) * 0.18 * f;
+      c.head.scale.set(sq, 1 / sq, sq);
+    }
+  } else c.head.scale.set(1, 1, 1);
 
   g.updateMatrixWorld(true);
   c.shoulder.getWorldPosition(_v);
@@ -411,13 +429,23 @@ function startPoint() {
   updateScoreUI();
 }
 
+function react(winner) {
+  const w = winner === 'player' ? player : ai;
+  const l = winner === 'player' ? ai : player;
+  w.react = 1.2; w.reactKind = 'win';
+  l.react = 1.2; l.reactKind = 'lose';
+}
+
 function award(winner, why) {
   if (state === 'point' || state === 'over') return;
   if (mode === 'drill') { drillResult(winner, why); return; }
+  const longRally = rally >= 6;
   score[winner]++;
   state = 'point';
-  pointTimer = 1.5;
+  pointTimer = 1.7;
   rally = 0;
+  react(winner);
+  if (longRally) { slowT = 0.7; fovKick = -8; }
   if (winner === 'player') { sfx.point(); pop(why || '得分！', '#7dff9a'); }
   else { sfx.lose(); pop(why || '失分…', '#ff7d7d'); }
   updateScoreUI();
@@ -440,6 +468,7 @@ function drillResult(winner, why) {
   rally = 0;
   if (winner === 'player' && lastHitter === 'player') {
     streak++;
+    react('player');
     if (streak > bestStreak) { bestStreak = streak; savePref('bestStreak', bestStreak); }
     sfx.point();
     pop(streak >= 3 ? `命中 ×${streak}！` : '命中！', '#7dff9a');
@@ -447,6 +476,7 @@ function drillResult(winner, why) {
     pop('發球失誤，重發', '#ffd23f'); // 發球機自己的失誤不算你的
   } else {
     streak = 0;
+    react('ai');
     sfx.lose();
     pop(why || '沒接到…', '#ff7d7d');
   }
@@ -492,7 +522,7 @@ function makeShot(s, p0, isServe, quality) {
 
   if (Math.abs(s.curve) > 0.09) {
     side = clamp(-s.curve * 5.5, -1, 1);
-    if (Math.abs(side) < 0.45) side = Math.sign(side) * 0.45; // 一劃出弧線就要有明顯效果
+    if (Math.abs(side) < 0.35) side = Math.sign(side) * 0.35; // 一劃出弧線就要有效果
     label = `${Math.abs(side) > 0.85 ? '強' : ''}${side > 0 ? '右旋 ↷' : '左旋 ↶'}`;
   }
   const ang = fwd > 0 ? Math.atan2(s.dx, fwd) : Math.sign(s.dx || 1) * 0.6;
@@ -559,7 +589,9 @@ function playerSwipe(s) {
   launch({ vel: sol.vel, spin: m.spin }, 'player');
   lastShotWasSmash = m.smash;
   swingActor(player, new THREE.Vector3(p0.x, p0.y, p0.z), dirX);
-  if (m.smash) { sfx.smash(); shake = 0.35; } else sfx.hit();
+  if (m.smash) { sfx.smash(); shake = 0.4; hitStop = 0.07; slowT = 0.5; fovKick = -14; }
+  else { sfx.hit(); if (quality > 0.85) fovKick = -5; }
+  if (Math.abs(m.spin.side) >= 0.6) camRollTarget = -m.spin.side * 0.14;
   if (m.label) pop(m.label, m.smash ? '#ff6b3d' : quality > 0.85 ? '#7dff9a' : '#ffd23f');
 }
 
@@ -603,6 +635,7 @@ function aiReturn() {
 
 function announceSpin(spin) {
   const info = spinInfo(spin);
+  if (Math.abs(spin.side) >= 0.8) camRollTarget = -spin.side * 0.08;
   if (info) setHint(`來球是${info.name}！彈起後會${info.name === '右旋' ? '往右' : info.name === '左旋' ? '往左' : '變快／變慢'}偏`);
   else setHint('球彈起來後，往前滑動擊球');
 }
@@ -669,29 +702,54 @@ function stepAfterPoint(dt) {
 // ───────────────────────── 輸入 ─────────────────────────
 let pts = null;
 const cv = renderer.domElement;
+// 手指軌跡特效：讓玩家看到自己「劃」出的線（弧線＝旋球）
+const fx = $('swipeFx');
+const fxCtx = fx.getContext('2d');
+let fxTimer = 0;
+function drawSwipe(list) {
+  fxCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  if (list.length < 2) return;
+  const s = analyzeSwipe(list);
+  const col = Math.abs(s.curve) > 0.09 ? (s.curve < 0 ? '#4cc9f0' : '#ff4fd8') : '#ffe27a';
+  fxCtx.lineCap = 'round'; fxCtx.lineJoin = 'round';
+  fxCtx.strokeStyle = col; fxCtx.shadowColor = col; fxCtx.shadowBlur = 16;
+  fxCtx.lineWidth = 9;
+  fxCtx.beginPath();
+  list.forEach((p, i) => (i ? fxCtx.lineTo(p.x, p.y) : fxCtx.moveTo(p.x, p.y)));
+  fxCtx.stroke();
+}
+function fadeSwipe() {
+  fx.style.transition = 'opacity .3s';
+  fx.style.opacity = '0';
+  clearTimeout(fxTimer);
+  fxTimer = setTimeout(() => fxCtx.clearRect(0, 0, window.innerWidth, window.innerHeight), 320);
+}
 cv.addEventListener('pointerdown', (e) => {
   unlockAudio();
   pts = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
   cv.setPointerCapture?.(e.pointerId);
+  clearTimeout(fxTimer);
+  fx.style.transition = 'none';
+  fx.style.opacity = '1';
+  fxCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 });
 cv.addEventListener('pointermove', (e) => {
-  if (pts) pts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+  if (!pts) return;
+  pts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+  drawSwipe(pts);
 });
 function endSwipe(e) {
   if (!pts) return;
   pts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
   const s = analyzeSwipe(pts);
   pts = null;
-  if (s.len < 12) s.len = 12; // 輕點也算一次很輕的推擊
+  fadeSwipe();
+  if (s.len < 28) return; // 只認「滑動」，輕點不算
   if (state === 'menu' || state === 'over' || state === 'editor') return;
   playerSwipe(s);
 }
 cv.addEventListener('pointerup', endSwipe);
-cv.addEventListener('pointercancel', () => { pts = null; });
-// 桌機測試：空白鍵 = 一般擊球；方向鍵微調
-window.addEventListener('keydown', (e) => {
-  if (e.code === 'Space') { unlockAudio(); playerSwipe({ dx: 0, dy: -150, len: 150, dur: 150, speed: 1.0, curve: 0 }); }
-});
+cv.addEventListener('pointercancel', () => { pts = null; fadeSwipe(); });
 
 // ───────────────────────── 選單 ─────────────────────────
 function showScreen(id) { // id 為 null 時全部隱藏
@@ -813,8 +871,12 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   // 直向螢幕拉高視角，確保桌子兩端都在畫面內
-  camera.fov = w / h < 0.8 ? 66 : 52;
+  baseFov = w / h < 0.8 ? 66 : 52;
+  camera.fov = baseFov;
   camera.updateProjectionMatrix();
+  const dpr = Math.min(window.devicePixelRatio, 2);
+  fx.width = w * dpr; fx.height = h * dpr;
+  fxCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -822,8 +884,12 @@ resize();
 let last = performance.now();
 let time = 0;
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  const rawDt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  if (hitStop > 0) hitStop -= rawDt;
+  slowT = Math.max(0, slowT - rawDt);
+  timeScale = lerp(timeScale, slowT > 0 ? 0.3 : 1, 1 - Math.exp(-14 * rawDt));
+  const dt = hitStop > 0 ? 0 : rawDt * timeScale;
   time += dt;
 
   const sub = 4;
@@ -869,7 +935,7 @@ function frame(now) {
   }
   trail[0].position.copy(ballMesh.position);
   trail[0].material.color.set(sInfo ? sInfo.css : '#ffc766');
-  trail[0].material.opacity = state === 'rally' ? clamp((speed - 2) / 8, 0, sInfo ? 0.8 : 0.4) : 0;
+  trail[0].material.opacity = state === 'rally' ? clamp((speed - 2) / 8, 0, sInfo ? 0.55 : 0.35) : 0;
   trail[0].scale.setScalar(1.0);
   // 球本體旋轉（條紋轉動）：上下旋繞 x 軸、側旋繞 y 軸
   if (state === 'rally' || state === 'point') {
@@ -882,20 +948,36 @@ function frame(now) {
   else pathMesh.count = 0;
   updateSpinTag();
 
-  // 鏡頭：輕微跟隨球 + 殺球震動
-  shake = Math.max(0, shake - dt);
+  // 鏡頭導演：來球時壓低靠近、殺球震動與變焦、旋球傾斜、得分時推近
+  shake = Math.max(0, shake - rawDt);
+  fovKick = lerp(fovKick, 0, 1 - Math.exp(-5 * rawDt));
+  camRollTarget = lerp(camRollTarget, 0, 1 - Math.exp(-2.2 * rawDt));
+  camRoll = lerp(camRoll, camRollTarget, 1 - Math.exp(-9 * rawDt));
   if (state === 'editor') {
     // 對準玩家正面；角色放在畫面上半部，下半部留給編輯面板
     camera.position.set(Math.sin(time * 0.6) * 0.25, 1.3, PLAYER_Z + 4.0);
     camera.lookAt(0, -0.1, PLAYER_Z);
+    camera.fov = baseFov;
   } else {
+    const incoming = state === 'rally' && lastHitter === 'ai' && ball.vel.z > 0;
+    camApproach = lerp(camApproach, incoming ? clamp(ball.pos.z / 2.6, 0, 1) : 0, 1 - Math.exp(-6 * rawDt));
+    pointDolly = lerp(pointDolly, state === 'point' || state === 'over' ? 1 : 0, 1 - Math.exp(-3 * rawDt));
+    const sx = (Math.random() - 0.5) * shake * 0.14, sy = (Math.random() - 0.5) * shake * 0.14;
     camera.position.set(
-      CAM_BASE.x + ball.pos.x * 0.12 + (Math.random() - 0.5) * shake * 0.12,
-      CAM_BASE.y + (Math.random() - 0.5) * shake * 0.12,
-      CAM_BASE.z,
+      CAM_BASE.x + clamp(ball.pos.x, -1.6, 1.6) * 0.32 + sx,
+      lerp(CAM_BASE.y, 2.9, camApproach) - 0.7 * pointDolly + sy,
+      lerp(CAM_BASE.z, 4.8, camApproach) - 1.4 * pointDolly,
     );
-    camera.lookAt(ball.pos.x * 0.25, 0.4, -0.3);
+    const ly = 0.4 + clamp(ball.pos.y - 0.8, 0, 1) * 0.25;
+    camera.lookAt(
+      lerp(ball.pos.x * 0.3, ball.pos.x * 0.7, pointDolly),
+      lerp(ly, ball.pos.y * 0.6, pointDolly),
+      lerp(-0.3 + camApproach * 0.8, ball.pos.z * 0.5, pointDolly),
+    );
+    camera.rotateZ(camRoll);
+    camera.fov = baseFov + fovKick - 4 * camApproach - 5 * pointDolly;
   }
+  camera.updateProjectionMatrix();
 
   renderer.render(scene, camera);
   requestAnimationFrame(frame);

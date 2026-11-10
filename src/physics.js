@@ -6,8 +6,8 @@ export const BALL_R = 0.04; // 比真實大一點，手機上才看得清楚
 export const TABLE = { halfW: 0.7625, halfL: 1.37, top: 0.76, netH: 0.1525 };
 export const NET_TOP = TABLE.top + TABLE.netH;
 
-const TOP_G = 6;     // 上旋／下旋對重力的額外影響（上旋下墜、下旋飄浮）
-const SIDE_A = 13;   // 側旋造成的橫向加速度（越大，飛行弧線越明顯）
+const TOP_G = 4.5;    // 上旋／下旋對重力的額外影響（上旋下墜、下旋飄浮）
+const SIDE_A = 8;    // 側旋造成的橫向加速度（越大，飛行弧線越明顯）
 
 export function makeBall() {
   return { pos: { x: 0, y: 1, z: 0 }, vel: { x: 0, y: 0, z: 0 }, spin: { top: 0, side: 0 } };
@@ -28,7 +28,7 @@ export function bounceOnTable(b) {
   // 上旋彈起後加速前進，下旋則減速；側旋讓球彈起後往旁邊跑
   const k = 1 + b.spin.top * 0.25;
   b.vel.z *= k;
-  b.vel.x = b.vel.x * k + b.spin.side * 1.7; // 側旋彈起後大幅偏轉
+  b.vel.x = b.vel.x * k + b.spin.side * 1.0; // 側旋彈起後明顯偏轉
   b.spin.top *= 0.75;
   b.spin.side *= 0.75;
 }
