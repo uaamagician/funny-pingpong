@@ -8,8 +8,8 @@ import { loadConfig, saveConfig, loadPref, savePref } from './storage.js';
 import { ARENAS, DEFAULT_ARENA } from './arenas.js';
 import { TUNE } from './tuning.js';
 import { getProfile, providerLabel } from './auth.js';
-import { CHARACTERS, RACKETS, BALLS, STAT_KEYS, STAT_NAME, ARENA_FX, DEFAULT_CHARACTER, DEFAULT_RACKET, DEFAULT_BALL, charById, racketById, ballById, baseMods, finalStats } from './characters.js';
 import { hostRoom, joinRoom, explainError } from './net.js';
+import { CHARACTERS, RACKETS, BALLS, STAT_KEYS, STAT_NAME, ARENA_FX, DEFAULT_CHARACTER, DEFAULT_RACKET, DEFAULT_BALL, charById, racketById, ballById, baseMods, finalStats } from './characters.js';
 import { analyzeSwipe, handOf, timingInfo, buildPlayerShot, buildAiShot, pickAiKind, finalizeShot, describeFlight, solveServe, SWEET } from './shots.js';
 
 // ───────────────────────── 基本設定 ─────────────────────────
@@ -658,7 +658,6 @@ function applyLoadout() {
   updateSkillUI();
 }
 
-const _v = new THREE.Vector3();
 
 // ───────────────────────── 連線對戰（房主 host ＋ 訪客 guest）─────────────────────────
 // 房主的電腦／手機負責「真正的比賽」（物理、規則、計分）；訪客只傳「我揮了一拍」，並接收畫面所需的快照。
@@ -959,6 +958,7 @@ function onlineFrame(rawDt) {
   if (rs && rs.lastRecv && Date.now() - rs.lastRecv > 9000) leaveOnline('和對手失去連線');
 }
 
+const _v = new THREE.Vector3();
 const _axisX = new THREE.Vector3(1, 0, 0);
 const _axisY = new THREE.Vector3(0, 1, 0);
 function updateActor(c, dt, time) {
@@ -1101,16 +1101,16 @@ function award(winner, why) {
   pointTimer = rdur > 0 ? rdur + 0.5 : 1.7;
   rally = 0;
   react(winner);
-  if (longRally && !rdur) { slowT = TUNE.smashSlow; fovKick = TUNE.smashFov; }
   if (online.role === 'host') netSend({ t: 'point', w: winner === 'player' ? 'host' : 'guest', sc: { h: score.player, g: score.ai } });
+  if (longRally && !rdur) { slowT = TUNE.smashSlow; fovKick = TUNE.smashFov; }
   if (winner === 'player') { sfx.point(); pop(why || '得分！', '#7dff9a'); }
   else { sfx.lose(); pop(why || '失分…', '#ff7d7d'); }
   updateScoreUI();
   const a = score.player, b = score.ai;
   if ((a >= WIN_SCORE || b >= WIN_SCORE) && Math.abs(a - b) >= 2) {
     state = 'over';
-    setTimeout(() => {
     if (online.role === 'host') netSend({ t: 'over', h: a, g: b });
+    setTimeout(() => {
       if (state !== 'over') return;
       $('overTitle').textContent = a > b ? '勝利' : '落敗';
       $('overScore').textContent = `${a} : ${b}`;
@@ -1152,8 +1152,8 @@ function launch(shot, hitter, isServe = false) {
   bounce = { player: 0, ai: 0 };
   rally++;
   aiTried = false;
-  resetPath();
   if (online.role === 'host') netSend({ t: 'ev', e: 'launch', by: hitter === 'player' ? 'host' : 'guest', p: [ball.pos.x, ball.pos.y, ball.pos.z] });
+  resetPath();
   rec.length = 0;
   recEvents.length = 0;
   landingOn = false;
@@ -1198,8 +1198,8 @@ function showShotInfo(shot, sim, tInfo, contact) {
 
 // 拋球發球：點一下球 → 球垂直拋起 → 落下到適合的高度時，點一下或滑過球發出去
 function tossBall() {
-  state = 'toss';
   if (online.role === 'guest') online.guestToss = true; // 連線時，拋球在本機進行，打出去才通知對方
+  state = 'toss';
   ball.vel = { x: 0, y: 3.3, z: 0 };
   ball.spin = { top: 0, side: 0 };
   setHint('球落下時，點一下或滑過球發球');
@@ -1211,8 +1211,8 @@ function stepToss(dt) {
     ball.pos = { x: player.x, y: 1.05, z: PLAYER_Z - 0.35 };
     ball.vel = { x: 0, y: 0, z: 0 };
     state = 'serve';
-    setHint('球回到手上了，再發一次');
     online.guestToss = false;
+    setHint('球回到手上了，再發一次');
   }
 }
 
@@ -1220,8 +1220,8 @@ function playerServe(s) {
   if (Math.abs(s.dy) < 25) return; // 往上滑＝一般發球，往下滑＝下旋發球
   if (!s.anyWin || s.contact > hitR()) { sfx.whoosh(); pop('要從球上滑過去！', '#ffd23f'); return; }
   const p0 = { ...ball.pos };
-  // 發球只看「左右」有沒有碰在中間，而且容錯加倍（不看這一劃的哪一段），所以不容易飛走
   if (online.role === 'guest') { guestServe(s, p0); return; }
+  // 發球只看「左右」有沒有碰在中間，而且容錯加倍（不看這一劃的哪一段），所以不容易飛走
   const shot = buildPlayerShot({ swipe: s, p0, hand: 'FH', isServe: true, errMul: 0.5, contact: { ox: (s.contactOx ?? 0) * 0.6, oy: 0 } });
   // 發球：球先落在自己這半桌，彈起後過網，再落在對方半桌
   const sv = solveServe(p0, shot.target, shot.spin);
@@ -1250,8 +1250,8 @@ function playerSwipe(s) {
   // 沒有隨機：球打得進不進，完全看「時機」和「滑過球的位置（甜蜜點）」
   const contact = { ox: s.contactOx ?? 0, oy: s.contactOy ?? 0 };
   const mods = curMods(); // 角色數值、被動、球拍、球、技能合起來的修正
-  const shot = buildPlayerShot({ swipe: s, p0, hand, timingOff: tInfo.off, contact, mods });
   if (online.role === 'guest') { guestHit(s, p0, hand, tInfo, contact, mods); return; }
+  const shot = buildPlayerShot({ swipe: s, p0, hand, timingOff: tInfo.off, contact, mods });
   const fin = finalizeShot(p0, shot);
   launch({ vel: fin.vel, spin: shot.spin, kickMul: shot.kickMul, hidden: shot.hidden }, 'player');
   consumeSkillOnShot();
@@ -1547,8 +1547,8 @@ function startGame(m) {
   startPoint();
 }
 function toMenu() {
-  replay = null;
   if (online.role) leaveOnline();
+  replay = null;
   state = 'menu';
   ball.vel = { x: 0, y: 0, z: 0 };
   ball.pos = { x: 0, y: 1.05, z: PLAYER_Z - 0.35 };
@@ -1662,16 +1662,15 @@ function openLoadout(m) {
 function closeLoadout() {
   $('loadout').classList.add('hidden');
   previewOff();
-}
   $('goBtn').disabled = false;
   $('goBtn').textContent = online.role ? '準備' : '開始';
+}
 function pickLoadout(key, list, dir) {
   loadout[key] = cycleId(list, loadout[key], dir);
   savePref(key, loadout[key]);
   applyLoadout();
   renderLoadout();
 }
-$('charPrev').addEventListener('click', () => pickLoadout('char', CHARACTERS, -1));
 // 連線畫面
 $('onlineBtn').addEventListener('click', openOnline);
 $('hostBtn').addEventListener('click', startHost);
@@ -1683,6 +1682,7 @@ $('onlineBack').addEventListener('click', () => {
   if ($('onlineHome').classList.contains('hidden')) { resetOnline(); setOnlineScreen('onlineHome'); return; } // 在建立／加入頁：回到選擇頁
   showScreen('menu');
 });
+$('charPrev').addEventListener('click', () => pickLoadout('char', CHARACTERS, -1));
 $('charNext').addEventListener('click', () => pickLoadout('char', CHARACTERS, 1));
 $('racketBtn').addEventListener('click', () => pickLoadout('racket', RACKETS, 1));
 $('ballBtn').addEventListener('click', () => pickLoadout('ball', BALLS, 1));
