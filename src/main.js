@@ -206,7 +206,7 @@ function ballScreen() {
 function canHitNow() {
   return (state === 'serve' && server === 'player')
     || (state === 'rally' && lastHitter === 'ai' && bounce.player >= 1 && ball.vel.z > 0
-      && ball.pos.z > 0.5 && ball.pos.z < 2.6 && ball.pos.y > 0.45);
+      && ball.pos.z > 0.95 && ball.pos.z < 2.5 && ball.pos.y > 0.45); // 太早（球還在桌面附近）的揮拍不算，空揮沒有任何後果
 }
 function updateHitRing() {
   const el = $('hitRing');
@@ -692,20 +692,11 @@ function playerSwipe(s) {
   if (state === 'serve' && server === 'player') { playerServe(s); return; }
   if (state !== 'rally') return;
   const dirX = clamp(s.dx / 120, -1, 1);
-  const reach = lastHitter === 'ai' && bounce.player >= 1 && ball.vel.z > 0 && ball.pos.z > 0.5 && ball.pos.z < 3.0 && ball.pos.y > 0.4;
-  if (s.anyWin && reach && s.contact > hitR()) {
+  const reach = lastHitter === 'ai' && bounce.player >= 1 && ball.vel.z > 0 && ball.pos.z > 0.8 && ball.pos.z < 3.0 && ball.pos.y > 0.4;
+  // 空揮（沒滑到球、或球還沒進入擊球範圍）只會揮一下拍子，不扣分、不出現任何訊息，可以揮很多次
+  if (!(s.anyWin && reach) || s.contact > hitR()) {
     sfx.whoosh();
     swingActor(player, new THREE.Vector3(player.x + dirX * 0.3, 1.1, PLAYER_Z - 1.0), dirX);
-    pop('沒滑到球！', '#ffd23f');
-    return;
-  }
-  if (!(s.anyWin && reach)) {
-    sfx.whoosh();
-    swingActor(player, new THREE.Vector3(player.x + dirX * 0.3, 1.1, PLAYER_Z - 1.0), dirX);
-    if (lastHitter === 'ai' && ball.vel.z > 0) {
-      if (bounce.player === 0) pop('太早了！', '#ffd23f');
-      else if (ball.pos.z >= 2.6) pop('太晚了！', '#ffd23f');
-    }
     return;
   }
   const p0 = { ...ball.pos };
