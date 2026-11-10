@@ -74,12 +74,21 @@ scene.add(floor);
 // 比賽場地地墊與聚光燈光束
 const court = new THREE.Mesh(
   new THREE.PlaneGeometry(4.6, 8.4),
-  new THREE.MeshToonMaterial({ color: 0x4a2f8f }),
+  new THREE.MeshStandardMaterial({ color: 0x4a2f8f, roughness: 0.95 }),
 );
 court.rotation.x = -Math.PI / 2;
 court.position.y = 0.004;
 court.receiveShadow = true;
 scene.add(court);
+// 場地白線（淡淡的邊界，讓場面有秩序）
+const courtLines = [];
+for (const [w, d, x, z] of [[4.3, 0.04, 0, -3.95], [4.3, 0.04, 0, 3.95], [0.04, 7.94, -2.15, 0], [0.04, 7.94, 2.15, 0]]) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.28 }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, 0.006, z);
+  scene.add(m);
+  courtLines.push(m);
+}
 const beams = [];
 for (const [x, c] of [[-2.6, 0xff4f8b], [2.6, 0x4cc9f0], [-1.1, 0xffd23f], [1.1, 0x9b5de5]]) {
   const beam = new THREE.Mesh(
@@ -121,44 +130,96 @@ stars.position.z = -10;
 stars.visible = false;
 scene.add(stars);
 
-// 球桌
-const tableMat = new THREE.MeshStandardMaterial({ color: 0x1f5fb8, roughness: 0.5 });
-const tableTop = new THREE.Mesh(new THREE.BoxGeometry(TABLE.halfW * 2, 0.04, TABLE.halfL * 2), tableMat);
-tableTop.position.y = TABLE.top - 0.02;
+// 球桌：微光澤的桌面、深色厚桌邊與桌底板、白色邊線與中線、金屬桌腳與橫撐、有網格的球網與網柱
+function tableSheen() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#e9e9e9'); grad.addColorStop(0.5, '#ffffff'); grad.addColorStop(1, '#e4e4e4');
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 256);
+  for (let i = 0; i < 900; i++) { // 很細的顆粒，看起來像桌面塗層
+    g.fillStyle = `rgba(0,0,0,${Math.random() * 0.035})`;
+    g.fillRect(Math.random() * 128, Math.random() * 256, 1, 1);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const tableMat = new THREE.MeshStandardMaterial({ color: 0x1b4f8f, roughness: 0.36, metalness: 0.03, map: tableSheen() });
+const tableEdgeMat = new THREE.MeshStandardMaterial({ color: 0x0f2f55, roughness: 0.6 });
+const metalMat = new THREE.MeshStandardMaterial({ color: 0x39414d, roughness: 0.45, metalness: 0.5 });
+const TOP_T = 0.035;
+const tableTop = new THREE.Mesh(
+  new THREE.BoxGeometry(TABLE.halfW * 2, TOP_T, TABLE.halfL * 2),
+  [tableEdgeMat, tableEdgeMat, tableMat, tableEdgeMat, tableEdgeMat, tableEdgeMat],
+);
+tableTop.position.y = TABLE.top - TOP_T / 2;
 tableTop.castShadow = true;
 tableTop.receiveShadow = true;
 scene.add(tableTop);
-const whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-const lineMid = new THREE.Mesh(new THREE.PlaneGeometry(0.012, TABLE.halfL * 2), whiteMat);
-lineMid.rotation.x = -Math.PI / 2;
-lineMid.position.y = TABLE.top + 0.001;
-scene.add(lineMid);
+const apron = new THREE.Mesh(new THREE.BoxGeometry(TABLE.halfW * 2 - 0.16, 0.07, TABLE.halfL * 2 - 0.28), new THREE.MeshStandardMaterial({ color: 0x1d232c, roughness: 0.7 }));
+apron.position.y = TABLE.top - TOP_T - 0.035;
+apron.castShadow = true;
+scene.add(apron);
+const lineMat = new THREE.MeshBasicMaterial({ color: 0xf4f6f8 });
+const flat = (w, d, x, z) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), lineMat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, TABLE.top + 0.0012, z);
+  scene.add(m);
+};
+flat(0.01, TABLE.halfL * 2 - 0.04, 0, 0); // 中線
 for (const s of [-1, 1]) {
-  const side = new THREE.Mesh(new THREE.PlaneGeometry(0.02, TABLE.halfL * 2), whiteMat);
-  side.rotation.x = -Math.PI / 2;
-  side.position.set(s * (TABLE.halfW - 0.01), TABLE.top + 0.001, 0);
-  scene.add(side);
-  const end = new THREE.Mesh(new THREE.PlaneGeometry(TABLE.halfW * 2, 0.02), whiteMat);
-  end.rotation.x = -Math.PI / 2;
-  end.position.set(0, TABLE.top + 0.001, s * (TABLE.halfL - 0.01));
-  scene.add(end);
-  for (const t of [-1, 1]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.07, TABLE.top, 0.07), new THREE.MeshStandardMaterial({ color: 0x222233 }));
-    leg.position.set(s * (TABLE.halfW - 0.1), TABLE.top / 2, t * (TABLE.halfL - 0.2));
-    scene.add(leg);
-  }
+  flat(0.02, TABLE.halfL * 2, s * (TABLE.halfW - 0.01), 0);   // 邊線
+  flat(TABLE.halfW * 2, 0.02, 0, s * (TABLE.halfL - 0.01));   // 底線
 }
-// 球網
+// 桌腳（金屬）+ 長邊橫撐 + 腳墊
+const legH = TABLE.top - TOP_T - 0.07;
+for (const sx of [-1, 1]) {
+  for (const sz of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.032, legH, 12), metalMat);
+    leg.position.set(sx * (TABLE.halfW - 0.13), legH / 2 + 0.02, sz * (TABLE.halfL - 0.26));
+    leg.castShadow = true;
+    scene.add(leg);
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.02, 14), new THREE.MeshStandardMaterial({ color: 0x15191f, roughness: 0.8 }));
+    foot.position.set(leg.position.x, 0.01, leg.position.z);
+    scene.add(foot);
+  }
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, (TABLE.halfL - 0.26) * 2), metalMat);
+  rail.position.set(sx * (TABLE.halfW - 0.13), 0.28, 0);
+  scene.add(rail);
+}
+// 球網：有網格紋路的半透明網、白色上緣、網柱與夾具
+function netTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 32;
+  const g = c.getContext('2d');
+  g.strokeStyle = 'rgba(255,255,255,0.75)';
+  g.lineWidth = 1;
+  for (let x = 0; x <= 256; x += 6) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 32); g.stroke(); }
+  for (let y = 0; y <= 32; y += 6) { g.beginPath(); g.moveTo(0, y); g.lineTo(256, y); g.stroke(); }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const NET_W = TABLE.halfW * 2 + 0.3;
 const net = new THREE.Mesh(
-  new THREE.PlaneGeometry(TABLE.halfW * 2 + 0.3, TABLE.netH),
-  new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide }),
+  new THREE.PlaneGeometry(NET_W, TABLE.netH - 0.012),
+  new THREE.MeshBasicMaterial({ map: netTexture(), transparent: true, alphaTest: 0.05, side: THREE.DoubleSide, depthWrite: false }),
 );
-net.position.set(0, TABLE.top + TABLE.netH / 2, 0);
+net.position.set(0, TABLE.top + (TABLE.netH - 0.012) / 2, 0);
 scene.add(net);
+const netBand = new THREE.Mesh(new THREE.BoxGeometry(NET_W, 0.016, 0.01), new THREE.MeshStandardMaterial({ color: 0xf4f6f8, roughness: 0.5 }));
+netBand.position.set(0, TABLE.top + TABLE.netH - 0.006, 0);
+scene.add(netBand);
 for (const s of [-1, 1]) {
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, TABLE.netH + 0.04, 8), new THREE.MeshStandardMaterial({ color: 0x999999 }));
-  post.position.set(s * (TABLE.halfW + 0.15), TABLE.top + TABLE.netH / 2, 0);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, TABLE.netH + 0.05, 10), metalMat);
+  post.position.set(s * (TABLE.halfW + 0.15), TABLE.top + (TABLE.netH + 0.05) / 2 - 0.01, 0);
   scene.add(post);
+  const clamp = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05), metalMat);
+  clamp.position.set(s * (TABLE.halfW + 0.15), TABLE.top - 0.02, 0);
+  scene.add(clamp);
 }
 
 // 落點標記（對手來球預告彈起位置）與落桌漣漪
@@ -294,6 +355,7 @@ function applyArena(id) {
   floor.material.color.set(a.floor);
   court.material.color.set(a.court);
   tableMat.color.set(a.table);
+  tableEdgeMat.color.copy(tableMat.color).multiplyScalar(0.5);
   ring.material.color.set(a.ring);
   beams.forEach((b, i) => b.material.color.set(a.beams[i % a.beams.length]));
   pillars.forEach((p, i) => {
@@ -301,8 +363,13 @@ function applyArena(id) {
     p.material.emissive.setHSL(a.hue[0] + (a.hue[1] - a.hue[0]) * (i / (pillars.length - 1)), a.sat, a.light);
   });
   stars.visible = a.stars;
+  // 裝飾：簡潔的場地不放霓虹柱、光束、發光圈
+  const d = a.decor || {};
+  pillars.forEach((p) => { p.visible = !!d.pillars; });
+  beams.forEach((b) => { b.visible = !!d.beams; });
+  ring.visible = !!d.ring;
 }
-applyArena(loadPref('arena', DEFAULT_ARENA));
+applyArena(loadPref('arena2', DEFAULT_ARENA));
 
 // 球、影子、殘影
 const ball = makeBall();
@@ -1047,7 +1114,7 @@ function renderArenas() {
     b.append(sw, t);
     b.addEventListener('click', () => {
       applyArena(id);
-      savePref('arena', id);
+      savePref('arena2', id);
       $('arenaName').textContent = a.name;
       renderArenas();
     });
