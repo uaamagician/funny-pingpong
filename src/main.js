@@ -16,7 +16,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 const WIN_SCORE = 11;
-const PLAYER_Z = 3.0;
+const PLAYER_Z = 3.5;
 const AI_Z = -2.6;
 const DIFFS = {
   // sigO / sigT：AI 擊球點與時機的偏差（越大越容易掛網、出界）；miss：AI 根本來不及接的機率
@@ -39,12 +39,12 @@ scene.background = new THREE.Color(0x1b1033);
 scene.fog = new THREE.Fog(0x1b1033, 9, 22);
 
 const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 60);
-const CAM_BASE = new THREE.Vector3(0, 3.5, 5.6);
+const CAM_BASE = new THREE.Vector3(0, 4.5, 6.8); // 比較高、比較遠，從上往下看，玩家的大頭不會擋住球桌
 let baseFov = 66;
 // 鏡頭導演：慢動作、頓幀、視角衝擊、傾斜、靠近來球
 let timeScale = 1, slowT = 0, hitStop = 0, fovKick = 0, camRoll = 0, camRollTarget = 0, camApproach = 0, pointDolly = 0;
 camera.position.copy(CAM_BASE);
-camera.lookAt(0, 0.4, -0.3);
+camera.lookAt(0, 0.3, -0.5);
 
 const hemi = new THREE.HemisphereLight(0xcfd8ff, 0x2a1450, 1.1);
 scene.add(hemi);
@@ -409,10 +409,11 @@ const ai = makeActor(randomConfig(), false);
 
 // 比賽時玩家的大頭會擋住視線，所以讓它半透明；編輯造型時要完全不透明
 function setHeadGhost(c, ghost) {
+  c.headBase = ghost ? 0.62 : 1; // 比賽時把玩家的頭縮小（只是視覺）
   c.head.traverse((o) => {
     if (!o.material) return;
     o.material.transparent = ghost;
-    o.material.opacity = ghost ? 0.35 : 1;
+    o.material.opacity = ghost ? 0.25 : 1;
     o.material.depthWrite = !ghost;
     o.material.needsUpdate = true;
     if (o.userData.outline) o.visible = !ghost; // 半透明時不要黑色描邊
@@ -457,9 +458,10 @@ function updateActor(c, dt, time) {
     } else {
       c.head.rotation.z += Math.sin(k * 24) * TUNE.reactWobble * 1.5 * f;
       const sq = 1 + Math.sin(k * 10) * 0.1 * f;
-      c.head.scale.set(sq, 1 / sq, sq);
+      const hb = c.headBase ?? 1;
+      c.head.scale.set(sq * hb, hb / sq, sq * hb);
     }
-  } else c.head.scale.set(1, 1, 1);
+  } else { const hb = c.headBase ?? 1; c.head.scale.set(hb, hb, hb); }
 
   g.updateMatrixWorld(true);
   c.shoulder.getWorldPosition(_v);
@@ -1177,8 +1179,8 @@ function frame(now) {
     const sx = (Math.random() - 0.5) * shake * 0.14, sy = (Math.random() - 0.5) * shake * 0.14;
     const camPos = new THREE.Vector3(
       CAM_BASE.x + clamp(ball.pos.x, -1.6, 1.6) * 0.32 + sx,
-      lerp(CAM_BASE.y, 2.9, camApproach) - 0.7 * TUNE.pointDolly * pointDolly + sy,
-      lerp(CAM_BASE.z, 4.8, camApproach) - 1.4 * TUNE.pointDolly * pointDolly,
+      lerp(CAM_BASE.y, 3.6, camApproach) - 0.7 * TUNE.pointDolly * pointDolly + sy,
+      lerp(CAM_BASE.z, 5.8, camApproach) - 1.4 * TUNE.pointDolly * pointDolly,
     );
     const ly = 0.4 + clamp(ball.pos.y - 0.8, 0, 1) * 0.25;
     const look = new THREE.Vector3(
