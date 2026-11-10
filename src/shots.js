@@ -56,10 +56,10 @@ const LATE_EARLY_FREE = 0.3;
  * ox：滑動路徑從球的左(−)右(+)擦過；oy：球落在這一劃的起手段(−)／收尾段(+)，中段最準（都以擊球圈半徑為單位）。
  * 回傳：dx 橫向偏移(m)、dDepth 深度變化(m，正＝更深)、dClear 過網高度減少(m)。
  */
-export function contactErrors({ ox = 0, oy = 0, timingOff = 0, kind = 'drive', errMul = 1 }) {
+export function contactErrors({ ox = 0, oy = 0, timingOff = 0, kind = 'drive', errMul = 1, free = LATE_EARLY_FREE }) {
   const m = (KIND_RISK[kind] ?? 1) * errMul * TUNE.errScale;
   const oxe = dead(ox), oye = dead(oy);
-  const late = Math.max(0, timingOff - LATE_EARLY_FREE), early = Math.max(0, -timingOff - LATE_EARLY_FREE);
+  const late = Math.max(0, timingOff - free), early = Math.max(0, -timingOff - free);
   const dx = m * 0.5 * oxe + 0.15 * clamp(timingOff / 0.8, -1, 1);
   const dDepth = m * (0.5 * Math.max(0, oye) - 0.35 * Math.max(0, -oye) + 0.7 * late - 0.55 * early)
     + (timingOff >= 0 ? 0.25 : 0.2) * timingOff;
@@ -75,7 +75,7 @@ const gauss = (rand) => Math.sqrt(-2 * Math.log(Math.max(1e-9, rand()))) * Math.
  * - 正手：力量大、旋轉強、能殺球；反手：較穩、力量小、改用快撥。
  * - 時機偏早 → 球偏左、變短；偏晚 → 球偏右、變深（容易出界）。
  */
-export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, contact = { ox: 0, oy: 0 }, isServe = false, errMul = 1, rand = () => 0.5 }) {
+export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, contact = { ox: 0, oy: 0 }, isServe = false, errMul = 1, mods = {}, rand = () => 0.5 }) {
   const FH = hand === 'FH';
   const fwd = -s.dy;
   const tq = clamp(1 - Math.abs(timingOff) / 0.9, 0, 1);
@@ -99,9 +99,10 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
   else kind = 'drive';
   // 球太低就挑起來（不能殺、不能拉）
   if (!isServe && p0.y < 0.78 && ['smash', 'loop', 'flick', 'drive', 'spin'].includes(kind)) kind = 'lift';
+  if (!isServe && mods.kind) kind = mods.kind; // 技能：指定球種（例如奶奶的怒吼＝殺球）
 
   // —— 旋轉：每一次滑動都有旋轉，快 = 強 ——
-  const spinMul = isServe ? 1 : (0.7 + 0.3 * tq) * (perfect ? 1.1 : 1);
+  const spinMul = (isServe ? 1 : (0.7 + 0.3 * tq) * (perfect ? 1.1 : 1)) * (mods.spin ?? 1);
   let top;
   switch (kind) {
     case 'chop': top = -(0.4 + 0.45 * clamp(-fwd / 140, 0, 1)) * (FH ? 1 : 1.1); break;
@@ -115,9 +116,12 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
     default: top = 0.18 + 0.12 * p;
   }
   top *= spinMul;
+  if (kind === 'chop') top *= mods.chopSpin ?? 1;
   if (Math.abs(top) < 0.12) top = Math.sign(top || 1) * 0.12;
   let side = clamp(-s.curve * 4.5, -1, 1) * (0.35 + 0.65 * p) * (FH ? 1 : 0.75) * spinMul;
   if (kind !== 'spin' && kind !== 'serve') side *= 0.6;
+  side *= mods.sideSpin ?? 1;
+  if (mods.sideMin && !isServe && Math.abs(side) < mods.sideMin) side = (Math.sign(side) || Math.sign(s.dx) || 1) * mods.sideMin; // 技能：保證有側旋
   if (isServe) side = clamp(side, -0.55, 0.55); // 發球的側旋上限，才發得進去
 
   // —— 速度與落點 ——
@@ -139,12 +143,14 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
   let tx = fwd > 0 ? clamp(Math.atan2(s.dx, fwd) / 0.9, -1, 1) * 0.58 : clamp(s.dx / 150, -1, 1) * 0.5;
 
   // 套用時機與擊球點造成的偏差（發球只受擊球點影響）
-  const e = contactErrors({ ox: contact.ox, oy: contact.oy, timingOff: isServe ? 0 : timingOff, kind, errMul: errMul * (FH ? 1 : 0.85) });
+  const e = contactErrors({ ox: contact.ox, oy: contact.oy, timingOff: isServe ? 0 : timingOff, kind, errMul: errMul * (FH ? 1 : 0.85) * (mods.err ?? 1), free: mods.free ?? LATE_EARLY_FREE });
   tx += e.dx;
   const dz = clamp(-tz + e.dDepth, 0.05, 1.9);   // 離網距離（越大越深）
   tz = -dz;
   if (!isServe) T += (1 - tq) * 0.1;
-  if (!isServe) T /= TUNE.push; // 推力：飛得更快、更有力
+  if (!isServe) T /= TUNE.push * (mods.push ?? 1); // 推力：飛得更快、更有力
+  if (kind === 'smash') T /= mods.smashPush ?? 1;
+  if (kind === 'drop') tz *= mods.dropDepth ?? 1;
   tx = clamp(tx, -1.1, 1.1);                      // 超過 ±0.76 就是出界
 
   const name = kind === 'spin' ? (side > 0 ? '右旋球' : '左旋球') : KIND_NAME[kind];
@@ -154,6 +160,7 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
   return {
     kind, hand, label, smash: kind === 'smash', perfect, quality, tq,
     off,
+    kickMul: mods.kickMul ?? 1, hidden: !!mods.hidden,
     target: { x: tx, y: TABLE.top + BALL_R, z: tz },
     T, spin: { top, side },
     // 太早或打在球上半 → 球被壓低（sink），過網高度不夠，會掛網
@@ -186,11 +193,13 @@ export function pickAiKind({ hitY = 0.9, rally = 0, aggressive = 0.5, rand = Mat
   return 'drive';
 }
 
+const scaleSpin = (sp, m) => ({ top: sp.top * m, side: sp.side * m });
+
 /**
  * AI 的球也走同一套規則：AI 的「擊球點」和「時機」會有高斯分布的偏差，偏差大小由難度決定，
  * 所以 AI 的失誤原因和你一樣（掛網、出界、沒過），只是由它的技術水準決定。
  */
-export function buildAiShot(kind, skill = { sigO: 0.4, sigT: 0.3 }, rand = Math.random) {
+export function buildAiShot(kind, skill = { sigO: 0.4, sigT: 0.3 }, rand = Math.random, mods = {}) {
   const d = AI_KINDS[kind] || AI_KINDS.drive;
   const range = ([a, b]) => a + (b - a) * rand();
   const ox = gauss(rand) * skill.sigO, oy = gauss(rand) * skill.sigO, timingOff = gauss(rand) * skill.sigT;
@@ -200,7 +209,7 @@ export function buildAiShot(kind, skill = { sigO: 0.4, sigT: 0.3 }, rand = Math.
   return {
     kind, label: d.name,
     target: { x, y: TABLE.top + BALL_R, z },
-    T: range(d.T), spin: d.spin(rand),
+    T: range(d.T) / (mods.push ?? 1), spin: scaleSpin(d.spin(rand), mods.spin ?? 1),
     clearance: kind === 'smash' ? 0.02 : 0.05,
     sink: e.dClear * 10,
   };

@@ -15,7 +15,7 @@ export function makeBall() {
 export function stepBall(b, dt) {
   const gEff = G * TUNE.gravity + b.spin.top * TUNE.topG;
   b.vel.y -= gEff * dt;
-  b.vel.x += b.spin.side * TUNE.sideA * dt;
+  b.vel.x += (b.spin.side * TUNE.sideA + TUNE.windX) * dt;
   b.pos.x += b.vel.x * dt;
   b.pos.y += b.vel.y * dt;
   b.pos.z += b.vel.z * dt;
@@ -23,11 +23,11 @@ export function stepBall(b, dt) {
 
 export function bounceOnTable(b) {
   b.pos.y = TABLE.top + BALL_R;
-  b.vel.y = -b.vel.y * 0.9;
+  b.vel.y = -b.vel.y * TUNE.restitution;
   // 上旋彈起後加速前進，下旋則減速；側旋讓球彈起後往旁邊跑
   const k = 1 + b.spin.top * TUNE.bounceTopK;
-  b.vel.z *= k;
-  b.vel.x = b.vel.x * k + b.spin.side * TUNE.bounceKick;
+  b.vel.z *= k * TUNE.slide;
+  b.vel.x = b.vel.x * k + b.spin.side * TUNE.bounceKick * (b.kickMul ?? 1); // kickMul < 0：落桌後往反方向跳（花式吊球）
   b.spin.top *= TUNE.spinDecay;
   b.spin.side *= TUNE.spinDecay;
 }
