@@ -552,7 +552,7 @@ function startPoint() {
   if (server === 'player') {
     ball.pos = { x: player.x, y: 1.05, z: PLAYER_Z - 0.35 };
     lastHitter = 'player';
-    setHint('從球上滑過去發球：往上滑＝一般，往下滑＝下旋，劃弧線＝側旋');
+    setHint('發球：點一下球＝一般發球，往上滑＝上旋，往下滑＝下旋，劃弧線＝側旋');
   } else {
     ball.pos = { x: ai.x, y: 1.05, z: AI_Z + 0.35 };
     lastHitter = 'ai';
@@ -924,13 +924,19 @@ function endSwipe(e) {
       const along = (lens[i - 1 >= 0 ? i - 1 : 0] + c.t * Math.hypot(p.x - q.x, p.y - q.y)) / total;
       s.contactOx = (c.cx - p.bx) / hitR();
       s.contactOy = clamp((along - 0.5) * 2.4, -1.2, 1.2) + 0.6 * (c.cy - p.by) / hitR();
+      s.tapOx = (c.cx - p.bx) / hitR();
+      s.tapOy = 0.6 * (c.cy - p.by) / hitR();
     }
   });
   pts = null;
   $('hitRing').classList.remove('touch');
   fadeSwipe();
-  if (s.len < 28) return; // 只認「滑動」，輕點不算
   if (state === 'menu' || state === 'over' || state === 'editor') return;
+  if (s.len < 28) {
+    // 點一下球 = 平擊（發球時 = 一般發球）。要點在擊球圈內；點得越靠近球心越準
+    if (!s.anyWin || s.contact > hitR()) return;
+    Object.assign(s, { dx: s.tapOx * 70, dy: -120, len: 120, dur: 220, speed: 0.85, curve: 0, contactOx: s.tapOx, contactOy: s.tapOy, tap: true });
+  }
   playerSwipe(s);
 }
 cv.addEventListener('pointerup', endSwipe);
