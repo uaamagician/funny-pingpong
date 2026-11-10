@@ -162,6 +162,22 @@ function serveTable() {
   console.table(rows);
 }
 
+function wideTable() {
+  console.log('\n══ 出界實驗：球在左／右邊、往不同角度揮（時機完美、打在甜蜜點；進／界）══');
+  const mk = (deg) => { const a = (deg * Math.PI) / 180; return { dx: Math.sin(a) * 150, dy: -Math.cos(a) * 150, len: 150, dur: 170, curve: 0, speed: 150 / 170 }; };
+  const degs = [-70, -60, -50, -40, -30, -15, 0, 15, 30, 40, 50, 60, 70];
+  console.log('球在 x   ' + degs.map((d) => `${d}°`.padStart(5)).join(''));
+  for (const bx of [-0.7, -0.4, 0, 0.4, 0.7]) {
+    let line = `${bx.toFixed(1)}${bx < 0 ? ' 左' : bx > 0 ? ' 右' : ' 中'}`.padEnd(9);
+    for (const d of degs) {
+      const p0 = { x: bx, y: 0.95, z: TUNE.idealZ };
+      const shot = buildPlayerShot({ swipe: mk(d), p0, hand: handOf(bx, 0.6 * bx), timingOff: 0, contact: { ox: 0, oy: 0 } });
+      line += sym(simulateShot(p0, shot).result).padStart(5);
+    }
+    console.log(line);
+  }
+}
+
 if (arg === 'compare') {
   run('較早一版（太誇張）', OLD);
   run('上一版（幅度減半）', { sideA: 4.5, topG: 3.0, bounceKick: 0.5, bounceTopK: 0.18 });
@@ -169,6 +185,7 @@ if (arg === 'compare') {
 } else run('目前設定');
 timingTable();
 contactGrid();
+wideTable();
 skillTable();
 aiTable();
 serveTable();
