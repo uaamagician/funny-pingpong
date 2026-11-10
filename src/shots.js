@@ -85,7 +85,7 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
   const perfect = !isServe && Math.abs(timingOff) < 0.2 && off < SWEET + 0.05; // 時機準 + 打在甜蜜點
 
   let p = clamp((s.speed - 0.35) / 1.7, 0, 1);
-  if (isServe) p = Math.min(p, 0.55);
+  if (isServe) p = Math.min(p, 0.35); // 發球不用太大力
   else p *= FH ? 1 : 0.85; // 反手力量較小
 
   // —— 決定球種 ——
@@ -118,6 +118,7 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
   if (Math.abs(top) < 0.12) top = Math.sign(top || 1) * 0.12;
   let side = clamp(-s.curve * 4.5, -1, 1) * (0.35 + 0.65 * p) * (FH ? 1 : 0.75) * spinMul;
   if (kind !== 'spin' && kind !== 'serve') side *= 0.6;
+  if (isServe) side = clamp(side, -0.55, 0.55); // 發球的側旋上限，才發得進去
 
   // —— 速度與落點 ——
   let T, tz;
@@ -132,7 +133,7 @@ export function buildPlayerShot({ swipe: s, p0, hand = 'FH', timingOff = 0, cont
     case 'lift': T = 0.88; tz = -1.0; break;
     default: // serve
       if (fwd < 0) { T = 0.9; tz = -(0.45 + 0.25 * p); }  // 下旋發球：慢、短
-      else { T = 0.82 - 0.3 * p; tz = -(0.5 + 0.6 * p); }
+      else { T = 0.85 - 0.2 * p; tz = -(0.5 + 0.35 * p); }
   }
   // 往前滑：看滑動方向；往下切：看左右偏多少（直直往下就是打中間）
   let tx = fwd > 0 ? clamp(Math.atan2(s.dx, fwd) / 0.9, -1, 1) * 0.58 : clamp(s.dx / 150, -1, 1) * 0.5;
@@ -303,9 +304,11 @@ export function describeFlight(p0, vel, spin) {
 export function solveServe(p0, L, spin) {
   const sgn = Math.sign(p0.z) || 1;
   const cands = [];
-  for (const T1 of [0.28, 0.34, 0.4, 0.48]) {
-    for (let bz = 0.2; bz <= 1.3; bz += 0.05) {
-      const B = { x: p0.x + (L.x - p0.x) * 0.35, y: TABLE.top + BALL_R, z: sgn * bz };
+  // 掃描：第一次落點的深度(bz)、第一段飛行時間(T1)、以及左右補償(bias，用來抵銷側旋造成的偏移)
+  for (const T1 of [0.3, 0.38, 0.46]) {
+    for (let bz = 0.25; bz <= 1.3; bz += 0.1) {
+      for (const bias of [-0.5, -0.35, -0.2, -0.1, 0, 0.1, 0.2, 0.35, 0.5]) {
+      const B = { x: p0.x + (L.x - p0.x) * 0.35 + bias, y: TABLE.top + BALL_R, z: sgn * bz };
       const sol = solveShot(p0, B, T1, spin, -1);
       const f = flight(p0, sol.vel, spin, 2.5);
       const first = f.bounces[0], second = f.bounces[1];
@@ -315,7 +318,10 @@ export function solveServe(p0, L, spin) {
       else if (!second) result = f.crossed ? 'out' : 'short';
       else result = second.side === sgn ? 'short' : 'ok';
       const lz = second ? second.z : f.end.z, lx = second ? second.x : f.end.x;
-      cands.push({ vel: sol.vel, own: first || null, result, err: Math.abs(lz - L.z) + 0.6 * Math.abs(lx - L.x), lz, lx });
+      const spd = Math.hypot(sol.vel.x, sol.vel.y, sol.vel.z);
+      // 誤差小的優先；差不多的話挑出手比較輕的（發球不要太大力）
+      cands.push({ vel: sol.vel, own: first || null, result, err: Math.abs(lz - L.z) + 0.6 * Math.abs(lx - L.x) + 0.015 * spd, lz, lx });
+      }
     }
   }
   // 選最接近目標的組合。目標若已經偏出桌面或貼網（例如打在球上半、力量過頭），自然就會失誤。
