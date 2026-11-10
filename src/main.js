@@ -7,6 +7,7 @@ import { loadConfig, saveConfig, loadPref, savePref } from './storage.js';
 import { ARENAS, DEFAULT_ARENA } from './arenas.js';
 import { TUNE } from './tuning.js';
 import { getProfile, providerLabel } from './auth.js';
+import { CHARACTERS, RACKETS, BALLS, STAT_KEYS, STAT_NAME, ARENA_FX, DEFAULT_CHARACTER, DEFAULT_RACKET, DEFAULT_BALL, charById, racketById, ballById, baseMods, finalStats } from './characters.js';
 import { analyzeSwipe, handOf, timingInfo, buildPlayerShot, buildAiShot, pickAiKind, finalizeShot, describeFlight, solveServe, SWEET } from './shots.js';
 
 // ───────────────────────── 基本設定 ─────────────────────────
@@ -262,7 +263,7 @@ function updateRipples(dt) {
 }
 
 // 擊球範圍圈：滑動路徑要經過球（圈內）才算打到
-const hitR = () => diff.hitR * clamp(Math.min(window.innerWidth, window.innerHeight * 0.56) / 375, 0.85, 1.5);
+const hitR = () => diff.hitR * clamp(Math.min(window.innerWidth, window.innerHeight * 0.56) / 375, 0.85, 1.5) * curMods().reach;
 const _bs = new THREE.Vector3();
 function ballScreen() {
   _bs.copy(ballMesh.position).project(camera);
@@ -476,9 +477,20 @@ function makeActor(cfg, isPlayer) {
   c.baseZ = isPlayer ? PLAYER_Z : AI_Z;
   return c;
 }
-let playerCfg = loadConfig();
-let player = makeActor(playerCfg, true);
-const ai = makeActor(randomConfig(), false);
+// ───────────────────────── 角色、球拍、球（出賽準備）─────────────────────────
+const loadout = { char: loadPref('char', DEFAULT_CHARACTER), racket: loadPref('racket', DEFAULT_RACKET), ball: loadPref('ball', DEFAULT_BALL) };
+let myChar = charById(loadout.char);
+let myRacket = racketById(loadout.racket);
+let myBall = ballById(loadout.ball);
+let base = baseMods(myChar, myRacket, myBall);   // 整場不變的修正
+let aiChar = charById('whirl');
+let aiBase = baseMods(aiChar, racketById('std'), ballById('std'));
+const skill = { gauge: 0, until: 0, armed: false };   // 技能槽、持續中的技能、待發動的下一球技能
+let pendingAiMiss = 0;                                // 技能讓對手下一次回球更容易失誤
+const lookWithRacket = (cfg) => ({ ...cfg, paddleColor: myRacket.color || cfg.paddleColor });
+let playerCfg = loadConfig(myChar.id, myChar.look);
+let player = makeActor(lookWithRacket(playerCfg), true);
+let ai = makeActor(aiChar.look, false);
 
 // 比賽時玩家的大頭會擋住視線，所以讓它半透明；編輯造型時要完全不透明
 function setPlayerGhost(c, ghost) {
@@ -502,16 +514,109 @@ function disposeActor(c) {
 function rebuildPlayer(cfg) {
   const x = player.x;
   disposeActor(player);
-  player = makeActor(cfg, true);
+  player = makeActor(lookWithRacket(cfg), true);
   player.x = x;
-  if (state === 'editor') player.group.rotation.y = 0;
+  if (state === 'editor' || state === 'loadout') player.group.rotation.y = 0;
   else setPlayerGhost(player, true);
   window.__game && (window.__game.player = player);
 }
 setPlayerGhost(player, true);
+function rebuildAi(look) {
+  const x = ai.x;
+  disposeActor(ai);
+  ai = makeActor(look, false);
+  ai.x = x;
+  window.__game && (window.__game.ai = ai);
+}
 
 function swingActor(c, toPos, dirX = 0, dur = 0.3, bh = false) {
   c.swing = { t: 0, to: toPos.clone(), dirX, dur, bh };
+}
+
+
+// ───────────────────────── 擊球修正（fx）與技能 ─────────────────────────
+const timedActive = () => skill.until > clockT;
+function curMods() {
+  const m = { push: base.push, spin: base.spin, err: base.err, free: base.free, reach: base.reach,
+    sideSpin: base.sideSpin, smashPush: base.smashPush, chopSpin: base.chopSpin, dropDepth: base.dropDepth };
+  if (myChar.id === 'mochi') m.free += 0.04 * Math.min(perfectChain, 3); // Q彈：連續完美，時機更寬
+  if (timedActive()) {
+    switch (myChar.skill.id) {
+      case 'laser': m.err = 0; break;
+      case 'bounce': m.reach *= 1.6; m.free *= 1.8; break;
+      case 'rage': m.push *= 1.15; m.spin *= 1.4; m.err *= 2; break;
+      case 'eightArms': m.reach *= 2; break;
+      default: break;
+    }
+  }
+  if (skill.armed) {
+    switch (myChar.skill.id) {
+      case 'tornado': m.sideMin = 0.7; m.sideSpin = (m.sideSpin ?? 1) * 1.6; m.kickMul = 2; break;
+      case 'roar': m.kind = 'smash'; break;
+      case 'fancyDrop': m.kind = 'drop'; m.sideMin = 0.7; m.kickMul = -1.6; break;
+      case 'invisible': m.hidden = true; break;
+      default: break;
+    }
+  }
+  return m;
+}
+function addGauge(v) { skill.gauge = Math.min(1, skill.gauge + v); updateSkillUI(); }
+function activateSkill() {
+  if (skill.gauge < 1 || !(state === 'serve' || state === 'toss' || state === 'rally')) return;
+  const sk = myChar.skill;
+  skill.gauge = 0;
+  if (sk.kind === 'timed') skill.until = clockT + sk.secs; else skill.armed = true;
+  pop(sk.name, '#f2b134');
+  sfx.point();
+  buzz(20);
+  updateSkillUI();
+}
+// 下一球技能：打出去之後才消耗，並讓對手的下一次回球更容易失誤
+function consumeSkillOnShot() {
+  if (!skill.armed) return;
+  skill.armed = false;
+  if (myChar.skill.id === 'smoke') pendingAiMiss += 0.35;
+  if (myChar.skill.id === 'invisible') pendingAiMiss += 0.35;
+}
+function updateSkillUI() {
+  const b = $('skillBtn');
+  if (!b) return;
+  const sk = myChar.skill;
+  const active = timedActive() || skill.armed;
+  const left = timedActive() ? (skill.until - clockT) / sk.secs : 0;
+  b.style.setProperty('--p', `${Math.round((active ? (timedActive() ? left : 1) : skill.gauge) * 100)}%`);
+  b.classList.toggle('ready', skill.gauge >= 1 && !active);
+  b.classList.toggle('active', active);
+  b.querySelector('b').textContent = active ? `${sk.name}${skill.armed ? '（下一球）' : ''}` : skill.gauge >= 1 ? `技能：${sk.name}` : sk.name;
+}
+// 對手角色：AI 也用同一套數值（只套用基礎數值與被動，不放技能）
+function aiSkill() { return { sigO: diff.sigO * aiBase.err, sigT: diff.sigT * (0.3 / aiBase.free) }; }
+function aiMods() { return { push: aiBase.push, spin: aiBase.spin }; }
+function pickAiCharacter() {
+  const pool = CHARACTERS.filter((c) => c.id !== myChar.id);
+  aiChar = pool[Math.floor(Math.random() * pool.length)];
+  aiBase = baseMods(aiChar, racketById('std'), ballById('std'));
+  rebuildAi(aiChar.look);
+  $('nameA').textContent = aiChar.name;
+}
+// 球與場地的物理效果（重力、彈性、滑行）
+function applyPhysicsFx() {
+  const a = ARENA_FX[currentArena] || {};
+  TUNE.gravity = base.gravity * (a.gravity ?? 1);
+  TUNE.restitution = base.rest;
+  TUNE.slide = base.slide * (a.slide ?? 1);
+  ballMesh.scale.setScalar(myBall.scale);
+  ballMesh.material.color.set(myBall.color);
+}
+function applyLoadout() {
+  myChar = charById(loadout.char);
+  myRacket = racketById(loadout.racket);
+  myBall = ballById(loadout.ball);
+  base = baseMods(myChar, myRacket, myBall);
+  playerCfg = loadConfig(myChar.id, myChar.look);
+  rebuildPlayer(playerCfg);
+  applyPhysicsFx();
+  updateSkillUI();
 }
 
 const _v = new THREE.Vector3();
@@ -700,6 +805,8 @@ function launch(shot, hitter, isServe = false) {
   serveStage = isServe ? 1 : 0;
   ball.vel = { ...shot.vel };
   ball.spin = { ...shot.spin };
+  ball.kickMul = shot.kickMul ?? 1;   // 技能：落桌後的偏轉倍率
+  ball.hidden = !!shot.hidden;        // 技能：隱形球
   lastHitter = hitter;
   bounce = { player: 0, ai: 0 };
   rally++;
@@ -797,9 +904,13 @@ function playerSwipe(s) {
   const tInfo = timingInfo(s.contactZ ?? p0.z);           // 以「滑過球的那一刻」的位置判斷時機
   // 沒有隨機：球打得進不進，完全看「時機」和「滑過球的位置（甜蜜點）」
   const contact = { ox: s.contactOx ?? 0, oy: s.contactOy ?? 0 };
-  const shot = buildPlayerShot({ swipe: s, p0, hand, timingOff: tInfo.off, contact });
-  const fin = finalizeShot(p0, shot); // 這球若注定失誤，速度會被弄壞（掛網／太長／太偏／沒過網）
-  launch({ vel: fin.vel, spin: shot.spin }, 'player');
+  const mods = curMods(); // 角色數值、被動、球拍、球、技能合起來的修正
+  const shot = buildPlayerShot({ swipe: s, p0, hand, timingOff: tInfo.off, contact, mods });
+  const fin = finalizeShot(p0, shot);
+  launch({ vel: fin.vel, spin: shot.spin, kickMul: shot.kickMul, hidden: shot.hidden }, 'player');
+  consumeSkillOnShot();
+  addGauge(shot.perfect ? 0.25 : 0.1);
+  pendingAiMiss += base.aiMiss ?? 0;
   lastShotWasSmash = shot.smash;
   swingActor(player, new THREE.Vector3(p0.x, p0.y, p0.z), dirX, 0.3, hand === 'BH');
   if (shot.smash) { sfx.smash(); shake = TUNE.smashShake; hitStop = 0.06; slowT = TUNE.smashSlow; fovKick = TUNE.smashFov; }
@@ -816,7 +927,7 @@ function playerSwipe(s) {
 function aiServe() {
   const p0 = { ...ball.pos };
   const kind = ['drive', 'spin', 'loop', 'chop', 'drop'][Math.floor(Math.random() * 5)];
-  const shot = buildAiShot(kind, diff);
+  const shot = buildAiShot(kind, aiSkill(), Math.random, aiMods());
   shot.target.z = clamp(shot.target.z, 0.4, 1.15); // 發球要落在你這邊的前半桌
   const sv = solveServe(p0, shot.target, shot.spin);
   launch({ vel: sv.vel, spin: shot.spin }, 'ai', true);
@@ -834,12 +945,14 @@ function aiReturn() {
   missP += Math.abs(ball.spin.side) * 0.2 + Math.max(0, -ball.spin.top) * 0.06;
   // 球太遠也接不到
   if (Math.abs(ball.pos.x - ai.x) > 0.5 * diff.react + 0.35) missP += 0.4;
+  missP += (1 - aiBase.reach) * 0.3 + pendingAiMiss; // 角色的範圍數值、技能（煙霧彈等）
+  pendingAiMiss = 0;
   if (Math.random() < missP) {
     swingActor(ai, new THREE.Vector3(p0.x + rnd(-0.5, 0.5), p0.y, p0.z - 0.1), 0.5, 0.35);
     return;
   }
   const kind = pickAiKind({ hitY: p0.y, rally, aggressive: diff.aggr });
-  const shot = buildAiShot(kind, diff);
+  const shot = buildAiShot(kind, aiSkill(), Math.random, aiMods());
   const fin = finalizeShot(p0, shot);
   launch({ vel: fin.vel, spin: shot.spin }, 'ai');
   const aiFlight = describeFlight(p0, fin.vel, shot.spin);
@@ -900,6 +1013,7 @@ function stepRally(dt) {
       return;
     }
     bounce[side]++;
+    if (side === 'player' && lastHitter === 'ai' && timedActive() && myChar.skill.id === 'mochiShield') { ball.vel.y *= 1.12; ball.vel.z *= 0.82; ball.vel.x *= 0.9; } // 麻糬護體：落桌後又高又慢
     if (mode === 'drill' && side === 'ai' && lastHitter === 'player') {
       award('player');
       return;
@@ -1019,7 +1133,7 @@ function endSwipe(e) {
   pts = null;
   $('hitRing').classList.remove('touch');
   fadeSwipe();
-  if (state === 'menu' || state === 'over' || state === 'editor') return;
+  if (state === 'menu' || state === 'over' || state === 'editor' || state === 'loadout') return;
   if (s.len < 28) {
     // 點一下球 = 平擊（發球時 = 一般發球）。要點在擊球圈內；點得越靠近球心越準
     if (!s.anyWin || s.contact > hitR()) return;
@@ -1054,6 +1168,7 @@ $('camBtn').addEventListener('click', () => {
 function setHud(on) {
   $('hud').classList.toggle('hidden', !on);
   $('quitBtn').classList.toggle('hidden', !on);
+  $('skillBtn').classList.toggle('hidden', !on);
   $('camBtn').classList.toggle('hidden', !on);
   document.querySelector('.score.match').classList.toggle('hidden', mode !== 'match');
   $('drillHud').classList.toggle('hidden', mode !== 'drill');
@@ -1074,6 +1189,10 @@ document.querySelectorAll('#diff button').forEach((b) => {
 function startGame(m) {
   unlockAudio();
   mode = m;
+  skill.gauge = 0; skill.until = 0; skill.armed = false; pendingAiMiss = 0;
+  pickAiCharacter();
+  applyPhysicsFx();
+  updateSkillUI();
   score = { player: 0, ai: 0 };
   streak = 0;
   firstServer = Math.random() < 0.5 ? 'player' : 'ai';
@@ -1093,8 +1212,8 @@ function toMenu() {
 }
 $('practiceBtn').addEventListener('click', () => { unlockAudio(); showScreen('practice'); });
 $('practiceBack').addEventListener('click', () => showScreen('menu'));
-$('matchBtn').addEventListener('click', () => startGame('match'));
-$('drillBtn').addEventListener('click', () => startGame('drill'));
+$('matchBtn').addEventListener('click', () => openLoadout('match'));
+$('drillBtn').addEventListener('click', () => openLoadout('drill'));
 $('againBtn').addEventListener('click', () => startGame(mode));
 $('quitBtn').addEventListener('click', toMenu);
 
@@ -1115,6 +1234,7 @@ function renderArenas() {
     b.append(sw, t);
     b.addEventListener('click', () => {
       applyArena(id);
+      applyPhysicsFx();
       savePref('arena2', id);
       $('arenaName').textContent = a.name;
       renderArenas();
@@ -1135,13 +1255,84 @@ $('arenaBtn').addEventListener('click', () => {
   arenaBox.classList.remove('hidden');
 });
 
+// 出賽準備：鏡頭轉到玩家正面（跟改造型一樣），下半部是選角色／球拍／球的面板
+let pendingMode = 'match';
+function previewOn() {
+  state = 'loadout';
+  showScreen(null);
+  setHud(false);
+  setHint('');
+  player.x = 0;
+  player.group.rotation.y = 0;
+  setPlayerGhost(player, false);
+  ballMesh.visible = shadow.visible = false;
+  trail.forEach((t) => { t.material.opacity = 0; });
+}
+function previewOff() {
+  player.group.rotation.y = Math.PI;
+  setPlayerGhost(player, true);
+  ballMesh.visible = shadow.visible = true;
+}
+const cycleId = (list, id, dir) => list[(list.findIndex((x) => x.id === id) + dir + list.length) % list.length].id;
+function renderLoadout() {
+  const ch = charById(loadout.char), rk = racketById(loadout.racket), bl = ballById(loadout.ball);
+  $('charName').textContent = ch.name;
+  $('charRole').textContent = ch.role;
+  const st = finalStats(ch, rk);
+  const box = $('charStats');
+  box.replaceChildren();
+  for (const k of STAT_KEYS) {
+    const row = document.createElement('div');
+    row.className = 'srow';
+    const n = document.createElement('span'); n.textContent = STAT_NAME[k];
+    const bar = document.createElement('div'); bar.className = 'sbar';
+    const fill = document.createElement('i'); fill.style.width = `${Math.min(100, st[k] * 10)}%`;
+    if (st[k] !== ch.stats[k]) fill.className = st[k] > ch.stats[k] ? 'up' : 'down'; // 球拍加減後的差異
+    bar.append(fill);
+    const v = document.createElement('b'); v.textContent = String(st[k]);
+    row.append(n, bar, v);
+    box.append(row);
+  }
+  $('charPassive').textContent = `被動｜${ch.passive.name}：${ch.passive.desc}`;
+  $('charSkill').textContent = `技能｜${ch.skill.name}：${ch.skill.desc}`;
+  $('racketBtn').textContent = rk.name;
+  $('ballBtn').textContent = bl.name;
+  $('gearDesc').textContent = `${rk.desc}　／　${bl.desc}`;
+  const fxd = ARENA_FX[currentArena]?.desc;
+  $('arenaFx').textContent = fxd ? `場地效果｜${fxd}` : '';
+}
+function openLoadout(m) {
+  unlockAudio();
+  pendingMode = m;
+  previewOn();
+  renderLoadout();
+  $('loadout').classList.remove('hidden');
+}
+function closeLoadout() {
+  $('loadout').classList.add('hidden');
+  previewOff();
+}
+function pickLoadout(key, list, dir) {
+  loadout[key] = cycleId(list, loadout[key], dir);
+  savePref(key, loadout[key]);
+  applyLoadout();
+  renderLoadout();
+}
+$('charPrev').addEventListener('click', () => pickLoadout('char', CHARACTERS, -1));
+$('charNext').addEventListener('click', () => pickLoadout('char', CHARACTERS, 1));
+$('racketBtn').addEventListener('click', () => pickLoadout('racket', RACKETS, 1));
+$('ballBtn').addEventListener('click', () => pickLoadout('ball', BALLS, 1));
+$('goBtn').addEventListener('click', () => { closeLoadout(); startGame(pendingMode); });
+$('loadoutBack').addEventListener('click', () => { closeLoadout(); state = 'menu'; showScreen('practice'); });
+$('skillBtn').addEventListener('click', activateSkill);
+
 // 角色編輯：鏡頭轉到玩家正面，下半部顯示編輯面板
 const editor = createEditor($('editor'), {
   getConfig: () => ({ ...playerCfg }),
   onChange: (cfg) => { playerCfg = { ...cfg }; rebuildPlayer(playerCfg); },
   onClose: (cfg) => {
     playerCfg = { ...cfg };
-    saveConfig(playerCfg);
+    saveConfig(playerCfg, myChar.id);
     state = 'menu';
     editor.close();
     player.group.rotation.y = Math.PI;
@@ -1227,6 +1418,16 @@ function frame(now) {
 
   // 球與影子、殘影
   ballMesh.position.set(ball.pos.x, ball.pos.y, ball.pos.z);
+  // 隱形球：過網後到落桌前看不見；幽靈球：忽隱忽現
+  const hiddenNow = ball.hidden && state === 'rally' && lastHitter === 'player' && ball.pos.z < 0.1 && bounce.ai === 0;
+  if (state !== 'editor' && state !== 'loadout') { ballMesh.visible = !hiddenNow; shadow.visible = !hiddenNow; }
+  ballMesh.material.opacity = myBall.blink ? 0.55 + 0.4 * Math.sin(time * 9) : 1;
+  ballMesh.material.transparent = !!myBall.blink;
+  const aw = ARENA_FX[currentArena]?.wind || 0;
+  TUNE.windX = state === 'rally' ? aw * Math.sin(clockT * 0.5) : 0;
+  const wt = $('windTag');
+  if (aw && (state === 'rally' || state === 'serve' || state === 'toss' || state === 'point')) { wt.style.display = 'block'; wt.textContent = Math.abs(TUNE.windX) < 0.12 ? '風：微' : TUNE.windX > 0 ? '風 →' : '風 ←'; } else wt.style.display = 'none';
+  updateSkillUI();
   const overTable = Math.abs(ball.pos.x) <= TABLE.halfW && Math.abs(ball.pos.z) <= TABLE.halfL && ball.pos.y > TABLE.top - 0.05;
   const baseY = overTable ? TABLE.top + 0.003 : 0.012;
   const hgt = Math.max(0, ball.pos.y - baseY);
@@ -1262,7 +1463,7 @@ function frame(now) {
   fovKick = lerp(fovKick, 0, 1 - Math.exp(-5 * rawDt));
   camRollTarget = lerp(camRollTarget, 0, 1 - Math.exp(-2.2 * rawDt));
   camRoll = lerp(camRoll, camRollTarget, 1 - Math.exp(-9 * rawDt));
-  if (state === 'editor') {
+  if (state === 'editor' || state === 'loadout') {
     // 對準玩家正面；角色放在畫面上半部，下半部留給編輯面板
     camera.position.set(Math.sin(time * 0.6) * 0.25, 1.3, PLAYER_Z + 4.0);
     camera.lookAt(0, -0.1, PLAYER_Z);
@@ -1304,8 +1505,9 @@ function frame(now) {
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
+applyLoadout();
 requestAnimationFrame(frame);
 
 // 提供除錯用的小接口（瀏覽器 console 可用 __game 檢視狀態）
-window.__game = { profile, get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get serveStage() { return serveStage; }, get streak() { return streak; }, get arena() { return currentArena; }, ballScreen, hitR, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
+window.__game = { profile, loadout, skill, get fxNow() { return curMods(); }, get aiChar() { return aiChar; }, activateSkill,  get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get serveStage() { return serveStage; }, get streak() { return streak; }, get arena() { return currentArena; }, ballScreen, hitR, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
 void NET_TOP;

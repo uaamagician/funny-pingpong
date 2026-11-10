@@ -123,6 +123,32 @@
     .arena { border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.05); }
     .arena.on { border-color:var(--gold); background:rgba(242,177,52,.1); }
     .quit, .camtoggle { border:1px solid rgba(255,255,255,.22); background:rgba(16,21,28,.7); }
+
+    .skillbtn { position:absolute; left:12px; bottom:calc(env(safe-area-inset-bottom) + 64px); min-width:150px; height:44px; padding:0 14px; border-radius:12px; border:1px solid rgba(255,255,255,.22); background:rgba(16,21,28,.78); color:#fff; font-size:14px; font-weight:700; z-index:3; overflow:hidden; }
+    .skillbtn.hidden { display:none; }
+    .skillbtn .fill { position:absolute; left:0; top:0; bottom:0; width:var(--p,0%); background:rgba(242,177,52,.28); transition:width .15s; }
+    .skillbtn b { position:relative; font-weight:700; }
+    .skillbtn.ready { border-color:var(--gold); background:rgba(242,177,52,.22); animation:ringpulse .6s ease-in-out infinite alternate; }
+    .skillbtn.active { border-color:var(--gold); }
+    .windtag { position:absolute; display:none; right:12px; top:calc(env(safe-area-inset-top) + 66px); font-size:13px; font-weight:700; background:rgba(16,21,28,.7); border:1px solid rgba(255,255,255,.18); border-radius:8px; padding:3px 10px; pointer-events:none; }
+    #loadout .sheet { max-height:62vh; }
+    .charcard { display:flex; align-items:center; gap:8px; margin:6px 0; }
+    .charcard .cc { flex:1; text-align:center; display:flex; flex-direction:column; gap:2px; }
+    .charcard .cc b { font-size:22px; }
+    .charcard .cc small { opacity:.7; font-size:13px; }
+    .nav { width:44px; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.06); color:#fff; font-size:26px; line-height:1; }
+    .stats { display:flex; flex-direction:column; gap:5px; margin:8px 0; }
+    .srow { display:flex; align-items:center; gap:10px; font-size:13px; }
+    .srow span { width:38px; opacity:.85; }
+    .sbar { flex:1; height:8px; border-radius:4px; background:rgba(255,255,255,.1); overflow:hidden; }
+    .sbar i { display:block; height:100%; background:var(--gold); border-radius:4px; }
+    .sbar i.up { background:#7bd389; } .sbar i.down { background:#e76f51; }
+    .srow b { width:18px; text-align:right; font-weight:700; }
+    .note { margin:6px 0; font-size:13px; line-height:1.5; }
+    .note.dim { opacity:.65; font-size:12px; }
+    .picks { display:flex; gap:10px; margin:10px 0 4px; }
+    .picks > div { flex:1; display:flex; flex-direction:column; gap:4px; font-size:12px; opacity:.95; }
+    .pickbtn { appearance:none; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.06); color:#fff; border-radius:10px; padding:10px 6px; font-size:14px; font-weight:700; }
   </style>
 </head>
 <body>
@@ -131,7 +157,7 @@
       <div class="score match">
         <div><small>你<span class="serve-dot" id="dotP"></span></small><b id="sP">0</b></div>
         <span class="sep">:</span>
-        <div><small>對手<span class="serve-dot" id="dotA"></span></small><b id="sA">0</b></div>
+        <div><small><span id="nameA">對手</span><span class="serve-dot" id="dotA"></span></small><b id="sA">0</b></div>
       </div>
       <div class="score drill hidden" id="drillHud">
         <div><small>連續命中</small><b id="sStreak">0</b></div>
@@ -142,6 +168,8 @@
     <button class="quit hidden" id="quitBtn" aria-label="離開">✕</button>
     <button class="camtoggle hidden" id="camBtn" aria-label="切換視角距離">視角：中</button>
     <div class="rally" id="rally"></div>
+    <div class="windtag" id="windTag"></div>
+    <button class="skillbtn hidden" id="skillBtn"><span class="fill"></span><b>技能</b></button>
     <canvas class="swipefx" id="swipeFx"></canvas>
     <div class="timering" id="timeRing"></div>
     <div class="hitring" id="hitRing"></div>
@@ -182,6 +210,32 @@
     <div class="editor hidden" id="arenaSheet"></div>
 
     <div class="editor hidden" id="editor"></div>
+
+    <div class="editor hidden" id="loadout">
+      <div class="sheet">
+        <h3>出賽準備</h3>
+        <div class="charcard">
+          <button class="nav" id="charPrev" aria-label="上一個角色">‹</button>
+          <div class="cc">
+            <b id="charName"></b><small id="charRole"></small>
+          </div>
+          <button class="nav" id="charNext" aria-label="下一個角色">›</button>
+        </div>
+        <div class="stats" id="charStats"></div>
+        <p class="note" id="charPassive"></p>
+        <p class="note" id="charSkill"></p>
+        <div class="picks">
+          <div><span>球拍</span><button class="pickbtn" id="racketBtn"></button></div>
+          <div><span>球</span><button class="pickbtn" id="ballBtn"></button></div>
+        </div>
+        <p class="note dim" id="gearDesc"></p>
+        <p class="note dim" id="arenaFx"></p>
+        <div class="bar">
+          <button class="btn small gray" id="loadoutBack">返回</button>
+          <button class="btn small" id="goBtn">開始</button>
+        </div>
+      </div>
+    </div>
 
     <div class="overlay hidden" id="over">
       <h1 id="overTitle">勝利!</h1>
