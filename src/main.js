@@ -683,7 +683,7 @@ function drillResult(winner, why) {
     react('player');
     if (streak > bestStreak) { bestStreak = streak; savePref('bestStreak', bestStreak); }
     sfx.point();
-    pop(streak >= 3 ? `命中 ×${streak}！` : '命中！', '#7dff9a');
+    if (streak >= 3) pop(`命中 ×${streak}`, '#7dff9a');
   } else if (winner === 'player') {
     pop('重發', '#ffd23f'); // 發球機自己的失誤不算你的
   } else {
@@ -808,7 +808,8 @@ function playerSwipe(s) {
   // 連續完美擊球：連擊數 + 震動回饋（手機）
   perfectChain = shot.perfect ? perfectChain + 1 : 0;
   buzz(shot.smash ? [18, 30, 18] : shot.perfect ? 16 : 8);
-  pop(perfectChain >= 2 ? `完美 ×${perfectChain}` : shot.label, shot.smash ? '#ff6b3d' : shot.perfect ? '#7dff9a' : '#ffd23f');
+  // 畫面不要太吵：只在殺球或連續完美時才跳大字，其他球種看上方的小資訊就好
+  if (shot.smash || perfectChain >= 2) pop(perfectChain >= 2 ? `完美 ×${perfectChain}` : shot.label, shot.smash ? '#ff8a4c' : '#7dff9a');
   showShotInfo(shot, describeFlight(p0, fin.vel, shot.spin), tInfo, contact);
 }
 
