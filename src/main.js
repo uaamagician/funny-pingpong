@@ -177,9 +177,21 @@ applyArena(loadPref('arena', DEFAULT_ARENA));
 
 // 球、影子、殘影
 const ball = makeBall();
+// 球上有條紋，旋轉才看得出來
+const ballTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff6dc'; g.fillRect(0, 0, 128, 64);
+  g.fillStyle = '#ff7a1a';
+  for (let i = 0; i < 4; i++) g.fillRect(i * 32 + 6, 0, 14, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
 const ballMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(BALL_R, 16, 12),
-  new THREE.MeshStandardMaterial({ color: 0xfff3d0, emissive: 0xffaa33, emissiveIntensity: 0.55 }),
+  new THREE.SphereGeometry(BALL_R * 1.3, 20, 14),
+  new THREE.MeshStandardMaterial({ map: ballTex, emissive: 0xffaa33, emissiveIntensity: 0.35 }),
 );
 scene.add(ballMesh);
 const shadow = new THREE.Mesh(
@@ -189,10 +201,67 @@ const shadow = new THREE.Mesh(
 shadow.rotation.x = -Math.PI / 2;
 scene.add(shadow);
 const trail = [];
-for (let i = 0; i < 10; i++) {
+for (let i = 0; i < 16; i++) {
   const m = new THREE.Mesh(new THREE.SphereGeometry(BALL_R, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffc766, transparent: true, opacity: 0 }));
   scene.add(m);
   trail.push(m);
+}
+
+// 旋轉種類 → 名稱、顏色、箭頭（軌跡與提示都用同一套顏色）
+function spinInfo(sp) {
+  if (Math.abs(sp.side) >= 0.3) return sp.side > 0
+    ? { name: '右旋', arrow: '↷', css: '#4cc9f0' }
+    : { name: '左旋', arrow: '↶', css: '#ff4fd8' };
+  if (sp.top >= 0.4) return { name: '上旋', arrow: '⤵', css: '#ffa31a' };
+  if (sp.top <= -0.3) return { name: '下旋', arrow: '⤴', css: '#7d9bff' };
+  return null;
+}
+
+// 飛行軌跡：沿著球走過的路留下一串發光小點，旋球的弧線一目了然
+const PATH_MAX = 220;
+const pathMesh = new THREE.InstancedMesh(
+  new THREE.SphereGeometry(0.016, 6, 5),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false }),
+  PATH_MAX,
+);
+pathMesh.count = 0;
+pathMesh.frustumCulled = false;
+scene.add(pathMesh);
+let pathN = 0;
+const pathLast = new THREE.Vector3();
+const _m4 = new THREE.Matrix4();
+function resetPath() {
+  pathN = 0;
+  pathMesh.count = 0;
+  pathLast.set(ball.pos.x, ball.pos.y, ball.pos.z);
+  const info = spinInfo(ball.spin);
+  pathMesh.material.color.set(info ? info.css : '#ffffff');
+  pathMesh.material.opacity = 0.9;
+}
+function growPath() {
+  const cur = new THREE.Vector3(ball.pos.x, ball.pos.y, ball.pos.z);
+  const d = cur.distanceTo(pathLast);
+  const steps = Math.min(8, Math.floor(d / 0.05));
+  for (let i = 1; i <= steps && pathN < PATH_MAX; i++) {
+    const q = pathLast.clone().lerp(cur, i / steps);
+    _m4.makeTranslation(q.x, q.y, q.z);
+    pathMesh.setMatrixAt(pathN++, _m4);
+  }
+  if (steps > 0) { pathLast.copy(cur); pathMesh.count = pathN; pathMesh.instanceMatrix.needsUpdate = true; }
+}
+
+// 飛行中跟著球的旋轉提示文字
+const _sp = new THREE.Vector3();
+function updateSpinTag() {
+  const el = $('spinTag');
+  const info = state === 'rally' ? spinInfo(ball.spin) : null;
+  if (!info) { el.style.display = 'none'; return; }
+  _sp.copy(ballMesh.position).project(camera);
+  el.style.display = 'block';
+  el.textContent = `${info.arrow} ${info.name}`;
+  el.style.color = info.css;
+  el.style.left = `${(_sp.x * 0.5 + 0.5) * window.innerWidth}px`;
+  el.style.top = `${(-_sp.y * 0.5 + 0.5) * window.innerHeight - 34}px`;
 }
 
 // 角色：玩家（背對鏡頭）與對手（正對鏡頭）
@@ -246,6 +315,8 @@ function swingActor(c, toPos, dirX = 0, dur = 0.3) {
 }
 
 const _v = new THREE.Vector3();
+const _axisX = new THREE.Vector3(1, 0, 0);
+const _axisY = new THREE.Vector3(0, 1, 0);
 function updateActor(c, dt, time) {
   const g = c.group;
   g.position.x = c.x;
@@ -390,6 +461,7 @@ function launch(shot, hitter) {
   bounce = { player: 0, ai: 0 };
   rally++;
   aiTried = false;
+  resetPath();
   updateScoreUI();
 }
 
@@ -418,9 +490,10 @@ function makeShot(s, p0, isServe, quality) {
   let tz = -(0.55 + 0.7 * p);
   let smash = false;
 
-  if (Math.abs(s.curve) > 0.13) {
-    side = clamp(-s.curve * 3.2, -1, 1);
-    label = side > 0 ? '右旋 ↷' : '左旋 ↶';
+  if (Math.abs(s.curve) > 0.09) {
+    side = clamp(-s.curve * 5.5, -1, 1);
+    if (Math.abs(side) < 0.45) side = Math.sign(side) * 0.45; // 一劃出弧線就要有明顯效果
+    label = `${Math.abs(side) > 0.85 ? '強' : ''}${side > 0 ? '右旋 ↷' : '左旋 ↶'}`;
   }
   const ang = fwd > 0 ? Math.atan2(s.dx, fwd) : Math.sign(s.dx || 1) * 0.6;
   let tx = clamp(ang / 0.9, -1, 1) * 0.62;
@@ -493,20 +566,20 @@ function playerSwipe(s) {
 function aiServe() {
   const p0 = { ...ball.pos };
   const target = { x: rnd(-0.6, 0.6), y: TABLE.top + BALL_R, z: rnd(0.45, 1.15) };
-  const spin = { top: rnd(0, 0.4), side: Math.random() < 0.3 ? rnd(-0.7, 0.7) : 0 };
+  const spin = { top: rnd(0, 0.5), side: Math.random() < 0.55 ? rnd(0.5, 1) * (Math.random() < 0.5 ? -1 : 1) : 0 };
   const sol = solveShot(p0, target, rnd(0.75, 0.95), spin);
   launch({ vel: sol.vel, spin }, 'ai');
   state = 'rally';
   swingActor(ai, new THREE.Vector3(p0.x, p0.y, p0.z), 0);
   sfx.hit();
-  setHint('球彈起來後，往前滑動擊球');
+  announceSpin(spin);
 }
 
 function aiReturn() {
   const p0 = { ...ball.pos };
   let missP = diff.miss;
   if (lastShotWasSmash) missP += 0.3;
-  if (Math.abs(ball.spin.side) > 0.4) missP += 0.08;
+  missP += Math.abs(ball.spin.side) * 0.2 + Math.max(0, -ball.spin.top) * 0.06;
   // 球太遠也接不到
   if (Math.abs(ball.pos.x - ai.x) > 0.5 * diff.react + 0.35) missP += 0.4;
   if (Math.random() < missP) {
@@ -516,13 +589,22 @@ function aiReturn() {
   const e = diff.err;
   const target = { x: clamp(rnd(-0.62, 0.62) + rnd(-e, e) * 0.5, -0.72, 0.72), y: TABLE.top + BALL_R, z: rnd(0.35, 1.25) };
   const r = Math.random();
-  const spin = r < 0.3 ? { top: rnd(-0.6, -0.2), side: 0 } : { top: rnd(0.1, 0.6), side: Math.random() < 0.35 ? rnd(-0.8, 0.8) : 0 };
+  const sideMag = rnd(0.5, 1.0) * (Math.random() < 0.5 ? -1 : 1);
+  const spin = r < 0.2 ? { top: rnd(-0.7, -0.3), side: 0 }
+    : { top: rnd(0.1, 0.6), side: Math.random() < 0.6 ? sideMag : 0 };
   const T = r < 0.15 ? rnd(1.0, 1.15) : rnd(0.55, 0.9);
   const sol = solveShot(p0, target, T, spin);
   launch({ vel: sol.vel, spin }, 'ai');
   lastShotWasSmash = false;
   swingActor(ai, new THREE.Vector3(p0.x, p0.y, p0.z), clamp(target.x, -1, 1));
   sfx.hit();
+  announceSpin(spin);
+}
+
+function announceSpin(spin) {
+  const info = spinInfo(spin);
+  if (info) setHint(`來球是${info.name}！彈起後會${info.name === '右旋' ? '往右' : info.name === '左旋' ? '往左' : '變快／變慢'}偏`);
+  else setHint('球彈起來後，往前滑動擊球');
 }
 
 // ───────────────────────── 每步更新 ─────────────────────────
@@ -778,14 +860,27 @@ function frame(now) {
   shadow.scale.setScalar(clamp(1.3 - hgt * 0.5, 0.35, 1.3));
   shadow.material.opacity = clamp(0.5 - hgt * 0.15, 0.12, 0.5);
   const speed = Math.hypot(ball.vel.x, ball.vel.y, ball.vel.z);
+  const sInfo = spinInfo(ball.spin);
   for (let i = trail.length - 1; i > 0; i--) {
     trail[i].position.copy(trail[i - 1].position);
-    trail[i].material.opacity = trail[i - 1].material.opacity * 0.82;
-    trail[i].scale.setScalar(trail[i - 1].scale.x * 0.93);
+    trail[i].material.opacity = trail[i - 1].material.opacity * 0.86;
+    trail[i].scale.setScalar(trail[i - 1].scale.x * 0.95);
+    trail[i].material.color.copy(trail[i - 1].material.color);
   }
   trail[0].position.copy(ballMesh.position);
-  trail[0].material.opacity = state === 'rally' ? clamp((speed - 3) / 12, 0, 0.45) : 0;
-  trail[0].scale.setScalar(0.9);
+  trail[0].material.color.set(sInfo ? sInfo.css : '#ffc766');
+  trail[0].material.opacity = state === 'rally' ? clamp((speed - 2) / 8, 0, sInfo ? 0.8 : 0.4) : 0;
+  trail[0].scale.setScalar(1.0);
+  // 球本體旋轉（條紋轉動）：上下旋繞 x 軸、側旋繞 y 軸
+  if (state === 'rally' || state === 'point') {
+    const dirZ = Math.sign(ball.vel.z) || 1;
+    ballMesh.rotateOnWorldAxis(_axisX, ball.spin.top * 40 * dirZ * dt + 6 * dirZ * dt);
+    ballMesh.rotateOnWorldAxis(_axisY, -ball.spin.side * 40 * dt);
+  }
+  if (state === 'rally') growPath();
+  else if (state === 'point') pathMesh.material.opacity = Math.max(0, pathMesh.material.opacity - dt * 0.9);
+  else pathMesh.count = 0;
+  updateSpinTag();
 
   // 鏡頭：輕微跟隨球 + 殺球震動
   shake = Math.max(0, shake - dt);
