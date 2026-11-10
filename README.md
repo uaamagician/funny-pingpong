@@ -2,4 +2,4 @@
 
 手機直式乒乓球遊戲，用手指滑動或點擊擊球。
 
-**遊戲連結：**（尚未部署，部署後填入）
+**遊戲連結：** https://github.com/uaamagician/funny-pingpong
