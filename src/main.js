@@ -408,15 +408,16 @@ let player = makeActor(playerCfg, true);
 const ai = makeActor(randomConfig(), false);
 
 // 比賽時玩家的大頭會擋住視線，所以讓它半透明；編輯造型時要完全不透明
-function setHeadGhost(c, ghost) {
+function setPlayerGhost(c, ghost) {
   c.headBase = ghost ? 0.62 : 1; // 比賽時把玩家的頭縮小（只是視覺）
-  c.head.traverse((o) => {
+  const inHead = (o) => { for (let p = o; p; p = p.parent) if (p === c.head) return true; return false; };
+  c.group.traverse((o) => {
+    if (o.userData.outline) { o.visible = !ghost; return; } // 透明時不要黑色描邊（描邊材質是各角色共用的，不能改它）
     if (!o.material) return;
     o.material.transparent = ghost;
-    o.material.opacity = ghost ? 0.25 : 1;
+    o.material.opacity = ghost ? (inHead(o) ? 0.12 : 0.4) : 1; // 頭最透明，身體次之，才不會擋到球桌
     o.material.depthWrite = !ghost;
     o.material.needsUpdate = true;
-    if (o.userData.outline) o.visible = !ghost; // 半透明時不要黑色描邊
   });
 }
 function disposeActor(c) {
@@ -431,10 +432,10 @@ function rebuildPlayer(cfg) {
   player = makeActor(cfg, true);
   player.x = x;
   if (state === 'editor') player.group.rotation.y = 0;
-  else setHeadGhost(player, true);
+  else setPlayerGhost(player, true);
   window.__game && (window.__game.player = player);
 }
-setHeadGhost(player, true);
+setPlayerGhost(player, true);
 
 function swingActor(c, toPos, dirX = 0, dur = 0.3, bh = false) {
   c.swing = { t: 0, to: toPos.clone(), dirX, dur, bh };
@@ -1042,7 +1043,7 @@ const editor = createEditor($('editor'), {
     state = 'menu';
     editor.close();
     player.group.rotation.y = Math.PI;
-    setHeadGhost(player, true);
+    setPlayerGhost(player, true);
     ballMesh.visible = shadow.visible = true;
     showScreen('menu');
   },
@@ -1055,7 +1056,7 @@ $('editBtn').addEventListener('click', () => {
   setHint('');
   player.x = 0;
   player.group.rotation.y = 0;
-  setHeadGhost(player, false);
+  setPlayerGhost(player, false);
   ballMesh.visible = shadow.visible = false;
   trail.forEach((t) => { t.material.opacity = 0; });
   editor.open();
