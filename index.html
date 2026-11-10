@@ -51,6 +51,8 @@
     .diff { display:flex; gap:8px; }
     .diff button { appearance:none; border:2px solid rgba(255,255,255,.3); background:rgba(255,255,255,.08); color:#fff; padding:8px 16px; border-radius:12px; font-size:15px; font-weight:700; }
     .diff button.on { background:var(--pink); border-color:#fff; }
+    .profile { background:rgba(255,255,255,.12); border:2px solid rgba(255,255,255,.25); border-radius:999px; padding:6px 16px; font-size:14px; font-weight:700; margin-bottom:6px; }
+    .profile small { opacity:.7; font-weight:600; margin-right:6px; }
     .hud.hidden { display:none; }
     .editor { position:absolute; left:0; right:0; bottom:0; }
     .editor.hidden { display:none; }
@@ -114,6 +116,7 @@
     <div class="overlay" id="menu">
       <h1>乒乓<br/>大亂鬥</h1>
       <div class="sub">手指一揮，殺球、旋球、吊球</div>
+      <div class="profile" id="profile"></div>
       <button class="btn" id="practiceBtn">AI 對練</button>
       <button class="btn alt" id="editBtn">改造型</button>
       <button class="btn gray" id="arenaBtn">場地：<span id="arenaName"></span></button>

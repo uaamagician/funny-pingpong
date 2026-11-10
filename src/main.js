@@ -6,6 +6,7 @@ import { createEditor } from './editor.js';
 import { loadConfig, saveConfig, loadPref, savePref } from './storage.js';
 import { ARENAS, DEFAULT_ARENA } from './arenas.js';
 import { TUNE } from './tuning.js';
+import { getProfile, providerLabel } from './auth.js';
 import { analyzeSwipe, handOf, timingInfo, buildPlayerShot, buildAiShot, pickAiKind, finalizeShot, describeFlight, solveServe, SWEET } from './shots.js';
 
 // ───────────────────────── 基本設定 ─────────────────────────
@@ -943,6 +944,15 @@ cv.addEventListener('pointerup', endSwipe);
 cv.addEventListener('pointercancel', () => { pts = null; fadeSwipe(); });
 
 // ───────────────────────── 選單 ─────────────────────────
+// 目前以遊客身分進入（之後連線對戰、背包存檔都用這個 id）
+const profile = getProfile();
+{
+  const el = $('profile');
+  const tag = document.createElement('small');
+  tag.textContent = providerLabel(profile);
+  el.append(tag, document.createTextNode(profile.name));
+}
+
 function showScreen(id) { // id 為 null 時全部隱藏
   for (const x of ['menu', 'practice', 'over']) $(x).classList.toggle('hidden', x !== id);
 }
@@ -1200,5 +1210,5 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // 提供除錯用的小接口（瀏覽器 console 可用 __game 檢視狀態）
-window.__game = { get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get serveStage() { return serveStage; }, get streak() { return streak; }, get arena() { return currentArena; }, ballScreen, hitR, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
+window.__game = { profile, get state() { return state; }, get server() { return server; }, get lastHitter() { return lastHitter; }, get bounce() { return bounce; }, get rally() { return rally; }, get mode() { return mode; }, get serveStage() { return serveStage; }, get streak() { return streak; }, get arena() { return currentArena; }, ballScreen, hitR, ball, score: () => ({ ...score }), player, ai, startPoint, startGame };
 void NET_TOP;
