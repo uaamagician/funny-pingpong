@@ -209,6 +209,7 @@ function ballScreen() {
 }
 function canHitNow() {
   return (state === 'serve' && server === 'player')
+    || (state === 'toss' && ball.vel.y < 0 && ball.pos.y > 0.85 && ball.pos.y < 1.45) // 拋球後，球落下到適合高度時才能打
     || (state === 'rally' && lastHitter === 'ai' && bounce.player >= 1 && ball.vel.z > 0
       && ball.pos.z > 0.95 && ball.pos.z < 2.5 && ball.pos.y > 0.45); // 太早（球還在桌面附近）的揮拍不算，空揮沒有任何後果
 }
@@ -221,9 +222,10 @@ function updateHitRing() {
   el.style.width = el.style.height = `${R * 2}px`;
   el.style.left = `${p.x}px`;
   el.style.top = `${p.y}px`;
-  const tq = state === 'serve' ? 1 : clamp(1 - Math.abs(ball.pos.z - 1.4) / 1.1, 0, 1);
+  const serving = state === 'serve' || state === 'toss';
+  const tq = serving ? 1 : clamp(1 - Math.abs(ball.pos.z - 1.4) / 1.1, 0, 1);
   el.classList.toggle('gold', tq > 0.8);
-  el.dataset.hand = state === 'serve' ? '發球' : '';
+  el.dataset.hand = serving ? '發球' : '';
   // 時機圈：外圈縮到跟綠圈一樣大的那一刻就是最佳擊球時機
   const tr = $('timeRing');
   if (state === 'rally') {
@@ -560,7 +562,7 @@ function startPoint() {
   if (server === 'player') {
     ball.pos = { x: player.x, y: 1.05, z: PLAYER_Z - 0.35 };
     lastHitter = 'player';
-    setHint('發球：點一下球＝一般發球，往上滑＝上旋，往下滑＝下旋，劃弧線＝側旋');
+    setHint('發球：點一下球拋起，落下時再點或滑過球打出去；也可以直接滑過球發球');
   } else {
     ball.pos = { x: ai.x, y: 1.05, z: AI_Z + 0.35 };
     lastHitter = 'ai';
@@ -678,11 +680,30 @@ function showShotInfo(shot, sim, tInfo, contact) {
   if (sim.landing) setLanding(sim.landing.x, sim.landing.z); // 立刻在球桌上標出落點
 }
 
+// 拋球發球：點一下球 → 球垂直拋起 → 落下到適合的高度時，點一下或滑過球發出去
+function tossBall() {
+  state = 'toss';
+  ball.vel = { x: 0, y: 3.3, z: 0 };
+  ball.spin = { top: 0, side: 0 };
+  setHint('球落下時，點一下或滑過球發球');
+  sfx.whoosh();
+}
+function stepToss(dt) {
+  stepBall(ball, dt);
+  if (ball.vel.y < 0 && ball.pos.y < 0.7) { // 沒打到：球回到手上，重新發球，不算失誤
+    ball.pos = { x: player.x, y: 1.05, z: PLAYER_Z - 0.35 };
+    ball.vel = { x: 0, y: 0, z: 0 };
+    state = 'serve';
+    setHint('球回到手上了，再發一次');
+  }
+}
+
 function playerServe(s) {
   if (Math.abs(s.dy) < 25) return; // 往上滑＝一般發球，往下滑＝下旋發球
   if (!s.anyWin || s.contact > hitR()) { sfx.whoosh(); pop('要從球上滑過去！', '#ffd23f'); return; }
   const p0 = { ...ball.pos };
-  const shot = buildPlayerShot({ swipe: s, p0, hand: 'FH', isServe: true, contact: { ox: s.contactOx ?? 0, oy: s.contactOy ?? 0 } });
+  // 發球只看「左右」有沒有碰在中間，而且容錯加倍（不看這一劃的哪一段），所以不容易飛走
+  const shot = buildPlayerShot({ swipe: s, p0, hand: 'FH', isServe: true, errMul: 0.5, contact: { ox: (s.contactOx ?? 0) * 0.6, oy: 0 } });
   // 發球：球先落在自己這半桌，彈起後過網，再落在對方半桌
   const sv = solveServe(p0, shot.target, shot.spin);
   launch({ vel: sv.vel, spin: shot.spin }, 'player', true);
@@ -694,7 +715,7 @@ function playerServe(s) {
 }
 
 function playerSwipe(s) {
-  if (state === 'serve' && server === 'player') { playerServe(s); return; }
+  if ((state === 'serve' || state === 'toss') && server === 'player') { playerServe(s); return; }
   if (state !== 'rally') return;
   const dirX = clamp(s.dx / 120, -1, 1);
   const reach = lastHitter === 'ai' && bounce.player >= 1 && ball.vel.z > 0 && ball.pos.z > 0.8 && ball.pos.z < 3.0 && ball.pos.y > 0.4;
@@ -934,6 +955,7 @@ function endSwipe(e) {
   if (s.len < 28) {
     // 點一下球 = 平擊（發球時 = 一般發球）。要點在擊球圈內；點得越靠近球心越準
     if (!s.anyWin || s.contact > hitR()) return;
+    if (state === 'serve' && server === 'player') { tossBall(); return; } // 發球：先點一下把球拋起來
     Object.assign(s, { dx: s.tapOx * 70, dy: -120, len: 120, dur: 220, speed: 0.85, curve: 0, contactOx: s.tapOx, contactOy: s.tapOy, tap: true });
   }
   playerSwipe(s);
@@ -1105,6 +1127,7 @@ function frame(now) {
   for (let i = 0; i < sub; i++) {
     const h = dt / sub;
     if (state === 'rally') stepRally(h);
+    else if (state === 'toss') stepToss(h);
     else if ((state === 'point' || state === 'over') && !replay) stepAfterPoint(h);
   }
   if (state === 'rally') rec.push({ t: clockT, x: ball.pos.x, y: ball.pos.y, z: ball.pos.z, top: ball.spin.top, side: ball.spin.side });
